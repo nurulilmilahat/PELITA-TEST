@@ -6,6 +6,7 @@
     <title>PELITA - Ponpes Nurul Ilmi</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap');
         
@@ -131,6 +132,32 @@
             </div>
         </div>
 
+        <!-- Custom Modal for Excel Export -->
+        <div id="modal-export" class="fixed inset-0 z-50 hidden bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+            <div class="glass w-full max-w-sm rounded-[2rem] p-6 shadow-2xl border border-white transform transition-all">
+                <h3 class="text-lg font-bold text-blue-950 mb-2">Unduh Laporan Excel</h3>
+                <p class="text-xs text-slate-500 mb-4">Pilih periode pengajuan izin untuk diekspor ke Excel.</p>
+                <div class="space-y-4">
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="text-[10px] font-bold text-slate-500 uppercase ml-1">Tgl Mulai</label>
+                            <input type="date" id="export-start" class="form-input mt-1 text-xs px-3 py-2">
+                        </div>
+                        <div>
+                            <label class="text-[10px] font-bold text-slate-500 uppercase ml-1">Tgl Selesai</label>
+                            <input type="date" id="export-end" class="form-input mt-1 text-xs px-3 py-2">
+                        </div>
+                    </div>
+                    <div class="flex gap-2 mt-2">
+                        <button onclick="closeModalExport()" class="flex-1 py-3 rounded-xl text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors">Batal</button>
+                        <button onclick="downloadExcel()" class="flex-1 py-3 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 transition-colors shadow-md flex items-center justify-center gap-2">
+                            <i class="fas fa-file-excel"></i> Unduh
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- AUTH VIEW (LOGIN / REGISTER) -->
         <div id="view-login" class="flex flex-col items-center justify-center min-h-[85vh] animate-fade-in">
             <div class="w-full max-w-[400px]">
@@ -178,7 +205,10 @@
                             <label class="text-sm font-bold text-slate-700 ml-1">Password</label>
                             <div class="relative">
                                 <i class="fas fa-lock absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"></i>
-                                <input type="password" id="password" required class="form-input pl-11 bg-white/50" placeholder="••••••••">
+                                <input type="password" id="password" required class="form-input pl-11 pr-11 bg-white/50" placeholder="••••••••">
+                                <button type="button" onclick="togglePasswordVisibility()" class="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-blue-600 focus:outline-none transition-colors">
+                                    <i class="fas fa-eye-slash" id="toggle-password-icon"></i>
+                                </button>
                             </div>
                         </div>
                         <button type="submit" id="btn-auth" class="btn-primary w-full text-white font-bold py-4 rounded-2xl shadow-xl flex items-center justify-center gap-3 group">
@@ -210,6 +240,8 @@
                             <span id="display-role" class="text-[9px] font-black uppercase tracking-widest text-blue-700 bg-blue-50 px-2 py-0.5 rounded">Role</span>
                             <span class="w-1 h-1 bg-slate-300 rounded-full"></span>
                             <span class="text-[10px] text-slate-500 font-medium" id="current-date"></span>
+                            <span class="w-1 h-1 bg-slate-300 rounded-full"></span>
+                            <span class="text-[10px] text-blue-600 font-bold tracking-wider" id="current-time"></span>
                         </div>
                     </div>
                 </div>
@@ -222,6 +254,36 @@
                 
                 <!-- LEFT COLUMN: Input Form -->
                 <div id="form-section" class="lg:col-span-5 space-y-6">
+                    
+                    <!-- PEGAWAI REKAPITULASI WIDGET -->
+                    <div id="pegawai-rekap-widget" class="hidden glass p-6 rounded-[2rem] shadow-xl border border-white animate-fade-in">
+                        <div class="flex items-center justify-between mb-4 border-b border-slate-100 pb-3">
+                            <h3 class="text-sm font-extrabold text-blue-950 flex items-center gap-2">
+                                <i class="fas fa-chart-pie text-blue-600"></i> Rekapitulasi & Kehadiran
+                            </h3>
+                            <span class="text-[10px] font-bold bg-blue-50 text-blue-700 px-2 py-1 rounded-lg" id="rekap-periode"></span>
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div id="card-rekap-b" class="bg-rose-50/50 p-3 rounded-xl border border-rose-100 transition-colors">
+                                <div class="text-[9px] font-bold text-rose-600 uppercase tracking-wider mb-0.5">Tidak Masuk (B)</div>
+                                <div class="text-xl font-black text-rose-700" id="rekap-b">0 <span class="text-[10px] font-bold text-rose-500">Hari</span></div>
+                            </div>
+                            <div class="bg-sky-50/50 p-3 rounded-xl border border-sky-100">
+                                <div class="text-[9px] font-bold text-sky-600 uppercase tracking-wider mb-0.5">Keluar Area (A)</div>
+                                <div class="text-xl font-black text-sky-700" id="rekap-a">0j 0m</div>
+                            </div>
+                            <div class="bg-emerald-50/50 p-3 rounded-xl border border-emerald-100">
+                                <div class="text-[9px] font-bold text-emerald-600 uppercase tracking-wider mb-0.5">Sakit (C)</div>
+                                <div class="text-xl font-black text-emerald-700" id="rekap-c">0 <span class="text-[10px] font-bold text-emerald-500">Hari</span></div>
+                            </div>
+                            <div class="bg-indigo-50/50 p-3 rounded-xl border border-indigo-100">
+                                <div class="text-[9px] font-bold text-indigo-600 uppercase tracking-wider mb-0.5">Cuti (E)</div>
+                                <div class="text-xl font-black text-indigo-700" id="rekap-e">0 <span class="text-[10px] font-bold text-indigo-500">Hari</span></div>
+                            </div>
+                        </div>
+                        <p class="text-[9px] text-slate-400 mt-3 flex items-center gap-1.5"><i class="fas fa-info-circle"></i> Akumulasi periode penggajian (Hanya yang disetujui).</p>
+                    </div>
+
                     <div class="glass p-6 md:p-8 rounded-[2rem] shadow-xl border border-white">
                         <div class="mb-6">
                             <h3 class="text-xl font-extrabold text-blue-950 flex items-center gap-2">
@@ -376,8 +438,63 @@
                     <div class="glass p-6 md:p-8 rounded-[2.5rem] shadow-xl border border-white min-h-[600px]">
                         <div class="flex justify-between items-center mb-6">
                             <h3 id="list-title" class="text-xl font-extrabold text-blue-950">Data Pengajuan</h3>
-                            <button onclick="renderList()" class="w-8 h-8 flex items-center justify-center bg-blue-50 text-blue-600 rounded-full hover:bg-blue-100 transition-colors">
-                                <i class="fas fa-sync-alt text-xs"></i>
+                            <div class="flex gap-2 items-center">
+                                <button id="btn-export-excel" onclick="openModalExport()" class="hidden items-center justify-center h-8 px-3 bg-emerald-50 text-emerald-600 rounded-full hover:bg-emerald-100 transition-colors border border-emerald-200 text-xs font-bold gap-1.5 shadow-sm">
+                                    <i class="fas fa-file-excel"></i> <span class="hidden sm:inline">Unduh Excel</span>
+                                </button>
+                                <button onclick="renderList()" class="w-8 h-8 flex items-center justify-center bg-blue-50 text-blue-600 rounded-full hover:bg-blue-100 transition-colors">
+                                    <i class="fas fa-sync-alt text-xs"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- QUICK LOOK DASHBOARD FOR KEPALA -->
+                        <div id="quick-look-dashboard" class="hidden mb-6 flex-col gap-4 animate-fade-in">
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div class="glass p-4 rounded-2xl border-l-4 border-amber-500 bg-amber-50/50">
+                                    <div class="text-[10px] font-black text-amber-600 uppercase tracking-wider mb-1">Menunggu Peninjauan</div>
+                                    <div class="text-3xl font-black text-amber-700" id="ql-pending">0</div>
+                                </div>
+                                <div class="glass p-4 rounded-2xl border-l-4 border-rose-500 bg-rose-50/50">
+                                    <div class="text-[10px] font-black text-rose-600 uppercase tracking-wider mb-1">Absen Penuh Hari Ini</div>
+                                    <div class="text-3xl font-black text-rose-700" id="ql-absen">0</div>
+                                    <div class="text-[9px] text-slate-500 mt-1 font-medium">Pegawai tidak di pondok</div>
+                                </div>
+                                <div class="glass p-4 rounded-2xl border-l-4 border-sky-500 bg-sky-50/50">
+                                    <div class="text-[10px] font-black text-sky-600 uppercase tracking-wider mb-1">Sedang Keluar Area</div>
+                                    <div class="text-3xl font-black text-sky-700" id="ql-keluar">0</div>
+                                    <div class="text-[9px] text-slate-500 mt-1 font-medium">Belum kembali (Kat. A)</div>
+                                </div>
+                            </div>
+                            <div class="glass p-4 rounded-2xl border border-slate-200 bg-white/50">
+                                <div class="flex items-center gap-2 mb-3">
+                                    <i class="fas fa-exclamation-circle text-rose-500"></i>
+                                    <h4 class="text-xs font-black text-slate-700 uppercase tracking-wider">Peringatan Kedisiplinan (Bulan Ini)</h4>
+                                </div>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div>
+                                        <div class="text-[10px] font-bold text-slate-500 mb-2 border-b border-slate-100 pb-1">Top 3 Izin Terbanyak</div>
+                                        <ul id="ql-top-izin" class="text-xs text-slate-600 space-y-1.5">
+                                            <!-- Injected via JS -->
+                                        </ul>
+                                    </div>
+                                    <div>
+                                        <div class="text-[10px] font-bold text-slate-500 mb-2 border-b border-slate-100 pb-1">Pengambil Izin B (Potong Gaji)</div>
+                                        <ul id="ql-alert-b" class="text-xs text-rose-600 font-medium space-y-1.5">
+                                            <!-- Injected via JS -->
+                                        </ul>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- AUTO-ARCHIVE TABS FOR KEPALA PONDOK -->
+                        <div id="kepala-tabs" class="hidden gap-6 mb-6 border-b border-blue-100">
+                            <button onclick="switchKepalaTab('aktif')" id="tab-aktif" class="pb-3 px-2 text-sm font-bold border-b-2 border-blue-600 text-blue-600 transition-colors">
+                                Antrian Aktif <span id="badge-aktif" class="ml-1 bg-amber-100 text-amber-700 py-0.5 px-2 rounded-full text-[10px]">0</span>
+                            </button>
+                            <button onclick="switchKepalaTab('riwayat')" id="tab-riwayat" class="pb-3 px-2 text-sm font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-600 transition-colors">
+                                Riwayat
                             </button>
                         </div>
 
@@ -431,6 +548,15 @@
         let activeAlasanStatus = null;
         let izinData = [];
         let unsubscribe = null;
+        let clockInterval = null;
+        let activeKepalaTab = 'aktif'; // State untuk Auto-Archive Tabs
+
+        // Tab Switcher Logic
+        function switchKepalaTab(tab) {
+            activeKepalaTab = tab;
+            renderList();
+        }
+        window.switchKepalaTab = switchKepalaTab;
 
         // Auth State Listener
         onAuthStateChanged(auth, async (user) => {
@@ -473,6 +599,22 @@
             }
         }
         window.toggleAuthMode = toggleAuthMode;
+
+        // Toggle Password Visibility
+        function togglePasswordVisibility() {
+            const passwordInput = document.getElementById('password');
+            const toggleIcon = document.getElementById('toggle-password-icon');
+            if (passwordInput.type === 'password') {
+                passwordInput.type = 'text';
+                toggleIcon.classList.remove('fa-eye-slash');
+                toggleIcon.classList.add('fa-eye');
+            } else {
+                passwordInput.type = 'password';
+                toggleIcon.classList.remove('fa-eye');
+                toggleIcon.classList.add('fa-eye-slash');
+            }
+        }
+        window.togglePasswordVisibility = togglePasswordVisibility;
 
         // Auth Logic (Login & Pendaftaran Tertutup)
         async function handleAuth(e) {
@@ -537,18 +679,30 @@
             const today = new Date();
             document.getElementById('current-date').textContent = today.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
 
+            // Jam Real-time
+            if (clockInterval) clearInterval(clockInterval);
+            const updateTime = () => {
+                document.getElementById('current-time').textContent = new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            };
+            updateTime(); // set immediate
+            clockInterval = setInterval(updateTime, 1000);
+
             // Pengaturan Query berdasarkan Peran (RLS Frontend Query)
             let q;
             if (currentUser.role === 'pegawai') {
                 document.getElementById('form-section').classList.remove('hidden');
                 document.getElementById('admin-widget').classList.add('hidden');
                 document.getElementById('list-title').textContent = 'Riwayat Pengajuan Saya';
+                document.getElementById('btn-export-excel').classList.add('hidden');
+                document.getElementById('btn-export-excel').classList.remove('flex');
                 // ROW-LEVEL SECURITY: Hanya fetch data miliknya sendiri
                 q = query(getColRef(), where("userUid", "==", currentUser.uid));
             } else {
                 document.getElementById('form-section').classList.add('hidden');
                 document.getElementById('admin-widget').classList.remove('hidden');
-                document.getElementById('list-title').textContent = 'Antrian Peninjauan Kepala Pondok';
+                document.getElementById('list-title').textContent = 'Manajemen Perizinan';
+                document.getElementById('btn-export-excel').classList.remove('hidden');
+                document.getElementById('btn-export-excel').classList.add('flex');
                 // Kepala Pondok bisa fetch semua data
                 q = getColRef();
             }
@@ -677,11 +831,57 @@
             const uploadField = document.getElementById('field_surat_dokter');
             const fileInput = document.getElementById('file_surat');
             
-            if (t1 && t2) {
-                const diffTime = new Date(t2) - new Date(t1);
-                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+            if (t1) {
+                let isBerlanjut = false;
                 
-                if (diffDays > 1) {
+                // 1. Cek apakah rentang pengajuan saat ini > 1 hari
+                if (t2) {
+                    const diffTime = new Date(t2) - new Date(t1);
+                    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+                    if (diffDays > 1) {
+                        isBerlanjut = true;
+                    }
+                }
+                
+                // 2. Cek apakah ini kelanjutan dari izin sakit hari sebelumnya
+                if (!isBerlanjut && currentUser) {
+                    const t1Date = new Date(t1);
+                    t1Date.setHours(0,0,0,0);
+                    const yesterday = new Date(t1Date);
+                    yesterday.setDate(yesterday.getDate() - 1);
+                    
+                    const yyyy = yesterday.getFullYear();
+                    const mm = String(yesterday.getMonth() + 1).padStart(2, '0');
+                    const dd = String(yesterday.getDate()).padStart(2, '0');
+                    const yesterdayStr = `${yyyy}-${mm}-${dd}`;
+
+                    const previousSakit = izinData.find(d => {
+                        if (d.userUid === currentUser.uid && d.kategori === 'C' && d.status !== 'Ditolak') {
+                            if (d.rawEndDate === yesterdayStr) return true;
+                            // Fallback untuk data lama
+                            if (!d.rawEndDate && d.jadwal) {
+                                const parts = d.jadwal.split('s/d');
+                                if (parts.length === 2) {
+                                    const endDateStr = parts[1].trim();
+                                    const dParts = endDateStr.split('/');
+                                    if (dParts.length === 3) {
+                                        const day = dParts[0].padStart(2, '0');
+                                        const month = dParts[1].padStart(2, '0');
+                                        const year = dParts[2];
+                                        if (`${year}-${month}-${day}` === yesterdayStr) return true;
+                                    }
+                                }
+                            }
+                        }
+                        return false;
+                    });
+
+                    if (previousSakit) {
+                        isBerlanjut = true;
+                    }
+                }
+                
+                if (isBerlanjut) {
                     uploadField.classList.remove('hidden');
                     fileInput.required = true;
                 } else {
@@ -772,7 +972,10 @@
                 submitDate: now.toLocaleString('id-ID'),
                 status: 'Menunggu Kepala Pondok',
                 alasanKepsek: '-',
-                jamSelesai: null // Digunakan untuk Kategori A
+                jamSelesai: null, // Digunakan untuk Kategori A
+                jamMulai: cat === 'A' ? document.getElementById('jam_mulai').value : null, // Data bantuan untuk kalkulasi Excel
+                rawStartDate: document.getElementById('tgl_mulai').value || null,
+                rawEndDate: document.getElementById('tgl_selesai').value || null
             };
 
             try {
@@ -860,7 +1063,7 @@
             const alasan = document.getElementById('input-alasan-kepsek').value;
             
             try {
-                await updateDoc(doc(db, "perizinan", activeAlasanId), {
+                await updateDoc(getDocRef(activeAlasanId), {
                     status: activeAlasanStatus,
                     alasanKepsek: alasan || '-'
                 });
@@ -873,25 +1076,329 @@
         }
         window.submitAlasan = submitAlasan;
 
+        // Fitur Export Excel (Hanya untuk Kepala)
+        function openModalExport() {
+            document.getElementById('modal-export').classList.remove('hidden');
+            const today = new Date();
+            const yyyy = today.getFullYear();
+            const mm = String(today.getMonth() + 1).padStart(2, '0');
+            const firstDay = `${yyyy}-${mm}-01`;
+            const lastDay = new Date(yyyy, today.getMonth() + 1, 0).toISOString().split('T')[0];
+            document.getElementById('export-start').value = firstDay;
+            document.getElementById('export-end').value = lastDay;
+        }
+        window.openModalExport = openModalExport;
+
+        function closeModalExport() {
+            document.getElementById('modal-export').classList.add('hidden');
+        }
+        window.closeModalExport = closeModalExport;
+
+        function downloadExcel() {
+            const startVal = document.getElementById('export-start').value;
+            const endVal = document.getElementById('export-end').value;
+            if(!startVal || !endVal) {
+                notify("Pilih tanggal mulai dan selesai", "error");
+                return;
+            }
+
+            const startDate = new Date(startVal);
+            startDate.setHours(0,0,0,0);
+            const endDate = new Date(endVal);
+            endDate.setHours(23,59,59,999);
+
+            const filteredData = izinData.filter(d => {
+                const docDate = new Date(d.timestamp);
+                return docDate >= startDate && docDate <= endDate;
+            });
+
+            if (filteredData.length === 0) {
+                notify("Tidak ada data pengajuan pada periode ini", "error");
+                return;
+            }
+
+            const excelData = filteredData.map((d, index) => {
+                let konsekuensi = '-';
+                if (d.kategori === 'B') konsekuensi = 'Pemotongan Gaji';
+                else if (d.kategori === 'A') konsekuensi = 'Wajib Ganti Jam Kerja';
+
+                let durasiAktual = '-';
+                if (d.kategori === 'A' && d.jamSelesai) {
+                    let jMulai = d.jamMulai;
+                    // Fallback untuk data lama sebelum ada field jamMulai
+                    if (!jMulai) {
+                        const match = d.jadwal.match(/Jam Keluar: (\d{2}:\d{2})/);
+                        if (match) jMulai = match[1];
+                    }
+                    if (jMulai) {
+                        const [h1, m1] = jMulai.split(':').map(Number);
+                        const [h2, m2] = d.jamSelesai.split(':').map(Number);
+                        let durMenit = (h2 * 60 + m2) - (h1 * 60 + m1);
+                        if (durMenit < 0) durMenit += 24 * 60; // Antisipasi pergantian hari
+                        const dJam = Math.floor(durMenit / 60);
+                        const dMen = durMenit % 60;
+                        durasiAktual = dJam > 0 ? dJam + ' Jam ' + dMen + ' Menit' : dMen + ' Menit';
+                    }
+                }
+
+                return {
+                    "No": index + 1,
+                    "Tgl Pengajuan": d.submitDate,
+                    "Nama Pegawai": d.name,
+                    "Kategori Izin": d.kategoriLabel,
+                    "Sub-Kategori": d.subTipe || '-',
+                    "Jadwal Pengajuan": d.jadwal,
+                    "Jam Tiba (Khusus Kategori A)": d.jamSelesai || '-',
+                    "Durasi Meninggalkan Area": durasiAktual,
+                    "Alasan Pegawai": d.keterangan,
+                    "Status": d.status,
+                    "Catatan Pimpinan": d.alasanKepsek || '-',
+                    "Indikator Konsekuensi SOP": konsekuensi
+                };
+            });
+
+            const ws = XLSX.utils.json_to_sheet(excelData);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Rekap Izin");
+            XLSX.writeFile(wb, `Laporan_Perizinan_PELITA_${startVal}_sd_${endVal}.xlsx`);
+            
+            notify("Laporan Excel berhasil diunduh!", "success");
+            closeModalExport();
+        }
+        window.downloadExcel = downloadExcel;
+
         // List Rendering
         function renderList() {
             const container = document.getElementById('main-list-container');
             const emptyState = document.getElementById('empty-state');
+            const tabsContainer = document.getElementById('kepala-tabs');
+            const quickLookDashboard = document.getElementById('quick-look-dashboard');
+            const rekapWidget = document.getElementById('pegawai-rekap-widget');
             
+            let dataToShow = izinData; // Default untuk pegawai
+
             if (currentUser.role === 'kepala') {
-                const pendingCount = izinData.filter(d => d.status === 'Menunggu Kepala Pondok').length;
+                tabsContainer.classList.remove('hidden');
+                tabsContainer.classList.add('flex');
+                quickLookDashboard.classList.remove('hidden');
+                quickLookDashboard.classList.add('flex');
+                if(rekapWidget) rekapWidget.classList.add('hidden');
+
+                // Pisahkan data Aktif dan Riwayat
+                const pendingData = izinData.filter(d => d.status === 'Menunggu Kepala Pondok');
+                const historyData = izinData.filter(d => d.status !== 'Menunggu Kepala Pondok');
+
+                // --- LOGIKA QUICK LOOK DASHBOARD ---
+                const today = new Date();
+                today.setHours(0,0,0,0);
+                const currentMonth = today.getMonth();
+                const currentYear = today.getFullYear();
+                
+                let absenCount = 0;
+                let keluarCount = 0;
+                let userIzinBulanIni = {};
+                let userCatBBulanIni = new Set();
+
+                izinData.forEach(d => {
+                    // Parse tanggal mulai dan selesai dari data
+                    let dStart = null;
+                    let dEnd = null;
+                    if (d.rawStartDate) {
+                        dStart = new Date(d.rawStartDate); dStart.setHours(0,0,0,0);
+                        dEnd = d.rawEndDate ? new Date(d.rawEndDate) : new Date(dStart); 
+                        dEnd.setHours(23,59,59,999);
+                    } else if (d.jadwal) {
+                        // Fallback parsing jadwal legacy
+                        if (d.jadwal.includes('Tanggal:')) {
+                            const match = d.jadwal.match(/Tanggal:\s*(\d+)\/(\d+)\/(\d+)/);
+                            if (match) { 
+                                dStart = new Date(match[3], match[2]-1, match[1]); dStart.setHours(0,0,0,0); 
+                                dEnd = new Date(dStart); dEnd.setHours(23,59,59,999); 
+                            }
+                        } else if (d.jadwal.includes('s/d')) {
+                            const parts = d.jadwal.split('s/d');
+                            if (parts.length === 2) {
+                                const m1 = parts[0].trim().split('/');
+                                const m2 = parts[1].trim().split('/');
+                                if (m1.length===3) { dStart = new Date(m1[2], m1[1]-1, m1[0]); dStart.setHours(0,0,0,0); }
+                                if (m2.length===3) { dEnd = new Date(m2[2], m2[1]-1, m2[0]); dEnd.setHours(23,59,59,999); }
+                            }
+                        }
+                    }
+
+                    const docDate = new Date(d.timestamp);
+
+                    // 1. Absen Penuh Hari Ini (Kat B, C, E yang Disetujui)
+                    if (d.status === 'Disetujui' && ['B', 'C', 'E'].includes(d.kategori)) {
+                        if (dStart && dEnd && today >= dStart && today <= dEnd) {
+                            absenCount++;
+                        }
+                    }
+
+                    // 2. Sedang Keluar Pondok (Kat A yang Disetujui, belum kembali, hari ini)
+                    if (d.status === 'Disetujui' && d.kategori === 'A' && !d.jamSelesai) {
+                        if (dStart && today.getTime() === dStart.getTime()) {
+                            keluarCount++;
+                        }
+                    }
+
+                    // 3. Peringatan Kedisiplinan Bulan Ini (Exclude Ditolak)
+                    if (d.status !== 'Ditolak' && docDate.getMonth() === currentMonth && docDate.getFullYear() === currentYear) {
+                        if (!userIzinBulanIni[d.name]) userIzinBulanIni[d.name] = 0;
+                        userIzinBulanIni[d.name]++;
+
+                        if (d.kategori === 'B') {
+                            userCatBBulanIni.add(d.name);
+                        }
+                    }
+                });
+
+                // Update UI Quick Look
+                document.getElementById('ql-pending').textContent = pendingData.length;
+                document.getElementById('ql-absen').textContent = absenCount;
+                document.getElementById('ql-keluar').textContent = keluarCount;
+
+                // Render Top 3
+                const topUsers = Object.entries(userIzinBulanIni).sort((a, b) => b[1] - a[1]).slice(0, 3);
+                const topListEl = document.getElementById('ql-top-izin');
+                if (topUsers.length > 0) {
+                    topListEl.innerHTML = topUsers.map((u, i) => `<li><span class="font-bold text-blue-600 mr-1">#${i+1}</span> ${u[0]} <span class="text-[10px] bg-slate-100 text-slate-500 font-bold px-1.5 py-0.5 rounded-full ml-1">${u[1]}x</span></li>`).join('');
+                } else {
+                    topListEl.innerHTML = '<li class="text-slate-400 italic">Belum ada data izin bulan ini.</li>';
+                }
+
+                // Render Alert Kategori B
+                const alertBEl = document.getElementById('ql-alert-b');
+                if (userCatBBulanIni.size > 0) {
+                    alertBEl.innerHTML = Array.from(userCatBBulanIni).map(name => `<li><i class="fas fa-exclamation-triangle mr-1"></i> ${name}</li>`).join('');
+                } else {
+                    alertBEl.innerHTML = '<li class="text-emerald-500 italic"><i class="fas fa-check-circle mr-1"></i> Bersih, tidak ada yang mengambil izin B.</li>';
+                }
+                // --- END LOGIKA QUICK LOOK ---
+
+                // Perbarui jumlah statistik di widget dan badge
+                const pendingCount = pendingData.length;
                 document.getElementById('stat-pending').textContent = pendingCount;
-                document.getElementById('stat-done').textContent = izinData.length - pendingCount;
+                document.getElementById('stat-done').textContent = historyData.length;
+                document.getElementById('badge-aktif').textContent = pendingCount;
+
+                // Atur styling tab dan data yang ditampilkan berdasarkan status aktif
+                if (activeKepalaTab === 'aktif') {
+                    document.getElementById('tab-aktif').className = "pb-3 px-2 text-sm font-bold border-b-2 border-blue-600 text-blue-600 transition-colors";
+                    document.getElementById('tab-riwayat').className = "pb-3 px-2 text-sm font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-600 transition-colors";
+                    dataToShow = pendingData;
+                } else {
+                    document.getElementById('tab-aktif').className = "pb-3 px-2 text-sm font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-600 transition-colors";
+                    document.getElementById('tab-riwayat').className = "pb-3 px-2 text-sm font-bold border-b-2 border-blue-600 text-blue-600 transition-colors";
+                    dataToShow = historyData;
+                }
+            } else {
+                tabsContainer.classList.add('hidden');
+                tabsContainer.classList.remove('flex');
+                quickLookDashboard.classList.add('hidden');
+                quickLookDashboard.classList.remove('flex');
+
+                if(rekapWidget) {
+                    rekapWidget.classList.remove('hidden');
+                    
+                    const today = new Date();
+                    let startPeriod, endPeriod;
+                    if (today.getDate() > 25) {
+                        startPeriod = new Date(today.getFullYear(), today.getMonth(), 26);
+                        endPeriod = new Date(today.getFullYear(), today.getMonth() + 1, 25, 23, 59, 59, 999);
+                    } else {
+                        startPeriod = new Date(today.getFullYear(), today.getMonth() - 1, 26);
+                        endPeriod = new Date(today.getFullYear(), today.getMonth(), 25, 23, 59, 59, 999);
+                    }
+                    
+                    const monthNames = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agt", "Sep", "Okt", "Nov", "Des"];
+                    document.getElementById('rekap-periode').textContent = `26 ${monthNames[startPeriod.getMonth()]} - 25 ${monthNames[endPeriod.getMonth()]}`;
+
+                    let countB = 0, countC = 0, countE = 0, durMenitA = 0;
+
+                    izinData.forEach(d => {
+                        if (d.userUid === currentUser.uid && d.status === 'Disetujui') {
+                            let dStart = null;
+                            let dEnd = null;
+                            if (d.rawStartDate) {
+                                dStart = new Date(d.rawStartDate); dStart.setHours(0,0,0,0);
+                                dEnd = d.rawEndDate ? new Date(d.rawEndDate) : new Date(dStart); 
+                                dEnd.setHours(23,59,59,999);
+                            } else if (d.jadwal) {
+                                if (d.jadwal.includes('Tanggal:')) {
+                                    const match = d.jadwal.match(/Tanggal:\s*(\d+)\/(\d+)\/(\d+)/);
+                                    if (match) { 
+                                        dStart = new Date(match[3], match[2]-1, match[1]); dStart.setHours(0,0,0,0); 
+                                        dEnd = new Date(dStart); dEnd.setHours(23,59,59,999); 
+                                    }
+                                } else if (d.jadwal.includes('s/d')) {
+                                    const parts = d.jadwal.split('s/d');
+                                    if (parts.length === 2) {
+                                        const m1 = parts[0].trim().split('/');
+                                        const m2 = parts[1].trim().split('/');
+                                        if (m1.length===3) { dStart = new Date(m1[2], m1[1]-1, m1[0]); dStart.setHours(0,0,0,0); }
+                                        if (m2.length===3) { dEnd = new Date(m2[2], m2[1]-1, m2[0]); dEnd.setHours(23,59,59,999); }
+                                    }
+                                }
+                            }
+                            
+                            if (dStart && dStart >= startPeriod && dStart <= endPeriod) {
+                                let days = 0;
+                                if(dEnd && dStart) {
+                                    days = Math.ceil((dEnd - dStart) / (1000 * 60 * 60 * 24)) + 1;
+                                } else {
+                                    days = 1;
+                                }
+
+                                if (d.kategori === 'B') countB += days;
+                                if (d.kategori === 'C') countC += days;
+                                if (d.kategori === 'E') countE += days;
+                                
+                                if (d.kategori === 'A' && d.jamSelesai) {
+                                    let jMulai = d.jamMulai;
+                                    if (!jMulai) {
+                                        const match = d.jadwal.match(/Jam Keluar: (\d{2}:\d{2})/);
+                                        if (match) jMulai = match[1];
+                                    }
+                                    if (jMulai) {
+                                        const [h1, m1] = jMulai.split(':').map(Number);
+                                        const [h2, m2] = d.jamSelesai.split(':').map(Number);
+                                        let durMenit = (h2 * 60 + m2) - (h1 * 60 + m1);
+                                        if (durMenit < 0) durMenit += 24 * 60; 
+                                        durMenitA += durMenit;
+                                    }
+                                }
+                            }
+                        }
+                    });
+
+                    const cardB = document.getElementById('card-rekap-b');
+                    document.getElementById('rekap-b').innerHTML = `${countB} <span class="text-[10px] font-bold text-rose-500">Hari</span>`;
+                    if(countB > 1) {
+                        cardB.classList.add('bg-rose-100', 'border-rose-300');
+                        cardB.classList.remove('bg-rose-50/50', 'border-rose-100');
+                    } else {
+                        cardB.classList.remove('bg-rose-100', 'border-rose-300');
+                        cardB.classList.add('bg-rose-50/50', 'border-rose-100');
+                    }
+
+                    document.getElementById('rekap-c').innerHTML = `${countC} <span class="text-[10px] font-bold text-emerald-500">Hari</span>`;
+                    document.getElementById('rekap-e').innerHTML = `${countE} <span class="text-[10px] font-bold text-indigo-500">Hari</span>`;
+                    
+                    const aJam = Math.floor(durMenitA / 60);
+                    const aMenit = durMenitA % 60;
+                    document.getElementById('rekap-a').textContent = `${aJam}j ${aMenit}m`;
+                }
             }
 
-            if (izinData.length === 0) {
+            if (dataToShow.length === 0) {
                 container.innerHTML = '';
                 emptyState.classList.remove('hidden');
                 return;
             }
 
             emptyState.classList.add('hidden');
-            container.innerHTML = izinData.map(item => createCardHTML(item)).join('');
+            container.innerHTML = dataToShow.map(item => createCardHTML(item)).join('');
         }
         window.renderList = renderList;
 
@@ -931,6 +1438,27 @@
                         <i class="fas fa-comment-dots"></i> Catatan Pimpinan: ${item.alasanKepsek}
                     </div>
                 `;
+            }
+
+            // Badge Hitung Durasi Otomatis (Izin Keluar Jam Kerja)
+            let durationBadge = '';
+            if (item.kategori === 'A' && item.jamSelesai) {
+                let jMulai = item.jamMulai;
+                if (!jMulai) {
+                    const match = item.jadwal.match(/Jam Keluar: (\d{2}:\d{2})/);
+                    if (match) jMulai = match[1];
+                }
+                if (jMulai) {
+                    const [h1, m1] = jMulai.split(':').map(Number);
+                    const [h2, m2] = item.jamSelesai.split(':').map(Number);
+                    let durMenit = (h2 * 60 + m2) - (h1 * 60 + m1);
+                    if (durMenit < 0) durMenit += 24 * 60; // Antisipasi pergantian hari
+                    const dJam = Math.floor(durMenit / 60);
+                    const dMen = durMenit % 60;
+                    const teksDurasi = dJam > 0 ? dJam + " Jam " + dMen + " Menit" : dMen + " Menit";
+                    
+                    durationBadge = '<div class="mt-2 text-[10px] font-bold text-sky-700 bg-sky-50 inline-block px-2 py-1 rounded border border-sky-100"><i class="fas fa-stopwatch"></i> Durasi di luar: ' + teksDurasi + '</div>';
+                }
             }
 
             // Admin Action Buttons
@@ -979,6 +1507,7 @@
                         ` : ''}
                         
                         ${alasanHTML}
+                        ${durationBadge}
                     </div>
                     
                     <div class="mt-3 flex gap-2">
