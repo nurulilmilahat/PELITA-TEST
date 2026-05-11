@@ -1,0 +1,1484 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  ChevronRight, ChevronLeft, CheckCircle, BookOpen, RefreshCcw,
+  Lock, Eye, X, LayoutDashboard, Database, PlusCircle, Trash2, LogOut,
+  Plus, Save, Copy, ArrowUp, ArrowDown, Edit3, UploadCloud, Check, AlertCircle,
+  Settings, Clock, User, EyeOff, Shuffle, List, Calendar,
+  Bold, Italic, Underline, Superscript, Subscript, AlignLeft, AlignCenter, AlignRight, AlignJustify,
+  FolderPlus, Folder, FolderOpen, ArrowLeft, GripVertical, MoveUp, History, FileText, Filter,
+  ArrowDownWideNarrow, SlidersHorizontal, Download 
+} from 'lucide-react';
+
+import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
+import { getFirestore, collection, addDoc, onSnapshot, query, deleteDoc, doc, updateDoc, writeBatch } from 'firebase/firestore';
+
+// --- KONFIGURASI FIREBASE ---
+const firebaseConfig = {
+  apiKey: "AIzaSyBOJY-vbe2bI_4ZkICQwjk7ddBgaS3Pn_w",
+  authDomain: "nise-2026.firebaseapp.com",
+  projectId: "nise-2026",
+  storageBucket: "nise-2026.firebasestorage.app",
+  messagingSenderId: "685241504060",
+  appId: "1:685241504060:web:af50f4b77448c56901ce39",
+  measurementId: "G-ZCF5839LV3"
+};
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const auth = getAuth(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'nise-app-v1';
+
+// --- KONSTANTA ---
+const SUBJECT_LIST = [
+  "Adab", "Akidah", "Bahasa Indonesia", "Bahasa Inggris", 
+  "Durus Al-Lughah Al-Arabiyah", "Ekstrakurikuler", "Fikih", "Hadis", 
+  "Ilmu Pengetahuan Alam", "Ilmu Pengetahuan Sosial", "Khat", "Kitabah", 
+  "Matematika", "Nahwu", "Pendidikan Kewarganegaraan", 
+  "Penjasorkes / Olahraga", "Qiraah wal Kitabah", "Saraf", 
+  "Sirah Nabawiah", "Ta'bir", "Tafsir", "Tajwid"
+];
+
+const CLASS_LIST = ["VII", "VIII", "IX"];
+const MCQ_LABELS = ['A', 'B', 'C', 'D'];
+
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [view, setView] = useState('front'); 
+  const [teacherTab, setTeacherTab] = useState('results');
+  const [examFiles, setExamFiles] = useState([]);
+  const [folders, setFolders] = useState([]); 
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(true);
+  
+  const formRef = useRef(null);
+  const editorRef = useRef(null);
+  const bankEditorRef = useRef(null);
+
+  // State Management
+  const [editingExam, setEditingExam] = useState(null);
+  const [expandedFileId, setExpandedFileId] = useState(null);
+  const [isAddingSoalToExisting, setIsAddingSoalToExisting] = useState(false);
+  const [editingSoalIdx, setEditingSoalIdx] = useState(null); 
+  const [reviewingResult, setReviewingResult] = useState(null);
+  
+  // Filtering & Sorting & Selection states
+  const [filterSubject, setFilterSubject] = useState('Semua Mapel');
+  const [filterFile, setFilterFile] = useState('Semua File');
+  const [sortType, setSortType] = useState('waktu-terbaru');
+  const [selectedResultIds, setSelectedResultIds] = useState([]);
+  
+  // Folder & Drag States
+  const [currentFolderId, setCurrentFolderId] = useState(null); 
+  const [isAddingFolder, setIsAddingFolder] = useState(false);
+  const [newFolderName, setNewFolderName] = useState('');
+  const [draggedFileId, setDraggedFileId] = useState(null);
+  const [dragOverFolderId, setDragOverFolderId] = useState(null);
+
+  // State Input & Ujian
+  const [studentData, setStudentData] = useState({ name: '', class: '', subject: '', fileId: '' });
+  const [teacherLogin, setTeacherLogin] = useState({ username: '', password: '', show: false });
+  
+  // State Ujian Aktif
+  const [currentExam, setCurrentExam] = useState(null);
+  const [activeQuizQuestions, setActiveQuizQuestions] = useState([]);
+  const [currentIdx, setCurrentIdx] = useState(0);
+  const [userAnswers, setUserAnswers] = useState([]);
+  const [timeLeft, setTimeLeft] = useState(0);
+  const [score, setScore] = useState(0);
+  const [maxScore, setMaxScore] = useState(0);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // State Buat Soal Baru
+  const [newFile, setNewFile] = useState({ title: '', subject: '', class: '', duration: 30 });
+  const [localQuestions, setLocalQuestions] = useState([]); 
+  const [newQuestion, setNewQuestion] = useState({ q: '', a: ['', '', '', ''], c: 0, p: 10, type: 'mcq' });
+  const [editingId, setEditingId] = useState(null); 
+  const [showBulkImport, setShowBulkImport] = useState(false);
+  const [bulkText, setBulkText] = useState("");
+  const [globalPoints, setGlobalPoints] = useState(10);
+  const [showWarning, setShowWarning] = useState(false);
+
+  // --- AUTH & SYNC ---
+  useEffect(() => {
+    const initAuth = async () => {
+      if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+        try { await signInWithCustomToken(auth, __initial_auth_token); } catch { await signInAnonymously(auth); }
+      } else { await signInAnonymously(auth); }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, setUser);
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    const unsubExams = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'exams'), (sn) => {
+      setExamFiles(sn.docs.map(d => ({ ...d.data(), id: d.id })));
+      setLoading(false);
+    }, (err) => console.error("Exams sync error:", err));
+
+    const unsubFolders = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'folders'), (sn) => {
+        setFolders(sn.docs.map(d => ({ ...d.data(), id: d.id })));
+    }, (err) => console.error("Folders sync error:", err));
+
+    const unsubResults = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'quiz_results'), (sn) => {
+      setResults(sn.docs.map(d => ({ ...d.data(), id: d.id })));
+    }, (err) => console.error("Results sync error:", err));
+
+    return () => { unsubExams(); unsubFolders(); unsubResults(); };
+  }, [user]);
+
+  useEffect(() => {
+    if (isAddingSoalToExisting && bankEditorRef.current) {
+        if (bankEditorRef.current.innerHTML !== newQuestion.q) {
+            bankEditorRef.current.innerHTML = newQuestion.q;
+        }
+    }
+  }, [isAddingSoalToExisting, editingSoalIdx]);
+
+  // Reset file filter & selection when subject filter changes
+  useEffect(() => {
+    setFilterFile('Semua File');
+    setSelectedResultIds([]);
+  }, [filterSubject]);
+
+  // --- LOGIKA TIMER UJIAN ---
+  useEffect(() => {
+    let timer;
+    if (view === 'exam' && timeLeft > 0) {
+      timer = setInterval(() => {
+        setTimeLeft(prev => prev - 1);
+      }, 1000);
+    } else if (view === 'exam' && timeLeft === 0) {
+      // Jika waktu habis, otomatis selesaikan ujian
+      finishExam();
+    }
+    return () => clearInterval(timer);
+  }, [view, timeLeft]);
+
+  // --- LOGIKA EKSPOR EXCEL ---
+  const handleExportToExcel = () => {
+    const dataToExport = getSortedResults();
+    if (dataToExport.length === 0) return;
+
+    const headers = ["Nama Santri", "Kelas", "Mata Pelajaran", "File Ujian", "Skor", "Waktu Selesai"];
+    const rows = dataToExport.map(res => [
+      res.student_name,
+      res.student_class,
+      res.subject,
+      res.fileName,
+      res.score,
+      formatDate(res.timestamp)
+    ]);
+
+    // Tambahkan BOM untuk kompatibilitas Excel (UTF-8)
+    let csvContent = "\uFEFF"; 
+    csvContent += headers.join(",") + "\n";
+    rows.forEach(row => {
+      const rowString = row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(",");
+      csvContent += rowString + "\n";
+    });
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `Hasil_Ujian_NISE_${new Date().toLocaleDateString('id-ID').replace(/\//g, '-')}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // --- LOGIKA MULTI-SELECT ---
+  const toggleSelectResult = (id) => {
+    setSelectedResultIds(prev => 
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
+    );
+  };
+
+  const toggleSelectAllResults = (filteredItems) => {
+    if (selectedResultIds.length === filteredItems.length && filteredItems.length > 0) {
+      setSelectedResultIds([]);
+    } else {
+      setSelectedResultIds(filteredItems.map(r => r.id));
+    }
+  };
+
+  const handleBulkDeleteResults = async () => {
+    if (selectedResultIds.length === 0) return;
+    
+    const confirmDelete = window.confirm(`Hapus ${selectedResultIds.length} data hasil ujian yang dipilih?`);
+    if (!confirmDelete) return;
+
+    try {
+      const batch = writeBatch(db);
+      selectedResultIds.forEach(id => {
+        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'quiz_results', id);
+        batch.delete(docRef);
+      });
+      await batch.commit();
+      setSelectedResultIds([]);
+    } catch (e) {
+      console.error("Gagal menghapus massal:", e);
+    }
+  };
+
+  // --- DRAG & DROP LOGIC ---
+  const handleDragStart = (fileId) => {
+    setDraggedFileId(fileId);
+  };
+
+  const handleDragOver = (e, folderId) => {
+    e.preventDefault();
+    setDragOverFolderId(folderId);
+  };
+
+  const handleDrop = async (folderId) => {
+    if (!draggedFileId) return;
+    try {
+      const examRef = doc(db, 'artifacts', appId, 'public', 'data', 'exams', draggedFileId);
+      await updateDoc(examRef, { folderId: folderId });
+    } catch (e) {
+      console.error("Gagal memindahkan file:", e);
+    } finally {
+      setDraggedFileId(null);
+      setDragOverFolderId(null);
+    }
+  };
+
+  // --- LOGIKA EDITOR ---
+  const execCmd = (command, value = null, targetRef = editorRef) => {
+    document.execCommand(command, false, value);
+    if (targetRef.current) {
+      setNewQuestion(prev => ({ ...prev, q: targetRef.current.innerHTML }));
+    }
+  };
+
+  const handleEditorInput = (e) => {
+    setNewQuestion(prev => ({ ...prev, q: e.target.innerHTML }));
+  };
+
+  // --- LOGIKA GURU ---
+  const handleTeacherLogin = () => {
+    if (teacherLogin.username === 'a' && teacherLogin.password === 'a') {
+      setView('teacher'); setTeacherLogin({ ...teacherLogin, show: false });
+    }
+  };
+
+  const handleUpdateMetadata = async () => {
+    if (!editingExam || !editingExam.title.trim()) return;
+    try {
+      const examRef = doc(db, 'artifacts', appId, 'public', 'data', 'exams', editingExam.id);
+      await updateDoc(examRef, {
+        title: String(editingExam.title),
+        subject: String(editingExam.subject),
+        class: String(editingExam.class),
+        duration: parseInt(editingExam.duration) || 30,
+        folderId: editingExam.folderId || null
+      });
+      setEditingExam(null);
+    } catch (e) {
+      console.error("Gagal memperbarui metadata:", e);
+    }
+  };
+
+  const toggleVisibility = async (file) => {
+    try {
+      const examRef = doc(db, 'artifacts', appId, 'public', 'data', 'exams', file.id);
+      await updateDoc(examRef, { visible: !file.visible });
+    } catch (e) { console.error(e); }
+  };
+
+  const toggleRandomize = async (file) => {
+    try {
+      const examRef = doc(db, 'artifacts', appId, 'public', 'data', 'exams', file.id);
+      await updateDoc(examRef, { isRandom: !file.isRandom });
+    } catch (e) { console.error(e); }
+  };
+
+  const updateSchedule = async (fileId, field, value) => {
+    try {
+      const examRef = doc(db, 'artifacts', appId, 'public', 'data', 'exams', fileId);
+      await updateDoc(examRef, { [field]: value });
+    } catch (e) { console.error(e); }
+  };
+
+  const handleCreateFolder = async () => {
+      if (!newFolderName.trim()) return;
+      try {
+          await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'folders'), {
+              name: newFolderName,
+              timestamp: new Date().toISOString()
+          });
+          setNewFolderName('');
+          setIsAddingFolder(false);
+      } catch (e) { console.error(e); }
+  };
+
+  const handleDeleteFolder = async (id) => {
+      const filesInFolder = examFiles.filter(f => f.folderId === id);
+      for (const file of filesInFolder) {
+          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'exams', file.id), { folderId: null });
+      }
+      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'folders', id));
+      if (currentFolderId === id) setCurrentFolderId(null);
+  };
+
+  const handleEditSoalInBank = (q, idx) => {
+    setEditingSoalIdx(idx);
+    setNewQuestion({ ...q });
+    setIsAddingSoalToExisting(true);
+  };
+
+  const handleSaveSoalToExisting = async (file) => {
+    if (!newQuestion.q.trim() || newQuestion.q === '<br>') return;
+    try {
+      const examRef = doc(db, 'artifacts', appId, 'public', 'data', 'exams', file.id);
+      let updatedQuestions = [...(file.questions || [])];
+      
+      if (editingSoalIdx !== null) {
+        updatedQuestions[editingSoalIdx] = { ...newQuestion, id: updatedQuestions[editingSoalIdx].id || Date.now() };
+      } else {
+        updatedQuestions.push({ ...newQuestion, id: Date.now() });
+      }
+      
+      await updateDoc(examRef, { questions: updatedQuestions });
+      
+      setNewQuestion({ q: '', a: ['', '', '', ''], c: 0, p: 10, type: 'mcq' });
+      setIsAddingSoalToExisting(false);
+      setEditingSoalIdx(null);
+      if (bankEditorRef.current) bankEditorRef.current.innerHTML = '';
+    } catch (e) { console.error(e); }
+  };
+
+  const addOrUpdateQuestion = () => {
+    if (!newQuestion.q.trim() || newQuestion.q === '<br>') return;
+    
+    if (editingId !== null) {
+      setLocalQuestions(prev => prev.map(q => q.id === editingId ? { ...newQuestion, id: editingId } : q));
+      setEditingId(null);
+    } else {
+      setLocalQuestions(prev => [...prev, { ...newQuestion, id: Date.now() }]);
+    }
+    
+    setNewQuestion({ 
+      q: '', 
+      a: newQuestion.type === 'tf' ? ['Benar', 'Salah'] : ['', '', '', ''], 
+      c: 0, 
+      p: globalPoints, 
+      type: newQuestion.type 
+    });
+    if (editorRef.current) editorRef.current.innerHTML = '';
+  };
+
+  const handleEditClick = (q) => {
+    setEditingId(q.id);
+    setNewQuestion({ ...q });
+    if (editorRef.current) editorRef.current.innerHTML = q.q;
+    if (formRef.current) {
+      formRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setNewQuestion({ q: '', a: ['', '', '', ''], c: 0, p: 10, type: 'mcq' });
+    if (editorRef.current) editorRef.current.innerHTML = '';
+  };
+
+  const deleteLocalQuestion = (id) => {
+    setLocalQuestions(prev => prev.filter(q => q.id !== id));
+    if (editingId === id) setEditingId(null);
+  };
+
+  const duplicateLocalQuestion = (id) => {
+    const original = localQuestions.find(q => q.id === id);
+    if (!original) return;
+    const idx = localQuestions.findIndex(q => q.id === id);
+    const newList = [...localQuestions];
+    newList.splice(idx + 1, 0, { ...original, id: Date.now() });
+    setLocalQuestions(newList);
+  };
+
+  const moveQuestion = (idx, direction) => {
+    if ((direction === 'up' && idx === 0) || (direction === 'down' && idx === localQuestions.length - 1)) return;
+    const newList = [...localQuestions];
+    const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+    [newList[idx], newList[targetIdx]] = [newList[targetIdx], newList[idx]];
+    setLocalQuestions(newList);
+  };
+
+  const handleBulkImport = () => {
+    const lines = bulkText.split('\n').filter(l => l.trim().includes('|'));
+    const imported = lines.map(line => {
+      const parts = line.split('|').map(s => s.trim());
+      const qText = parts[0];
+      const opts = (parts[1] || "").split(',').map(o => o.trim());
+      return {
+        id: Date.now() + Math.random(),
+        q: qText,
+        a: opts,
+        c: parseInt(parts[2]) || 0,
+        p: globalPoints,
+        type: opts.length === 2 ? 'tf' : 'mcq'
+      };
+    });
+    setLocalQuestions(prev => [...prev, ...imported]);
+    setBulkText("");
+    setShowBulkImport(false);
+  };
+
+  const saveExamToDB = async () => {
+    if (!newFile.title.trim() || !newFile.subject || !newFile.class) {
+      setShowWarning(true);
+      setTimeout(() => setShowWarning(false), 3000);
+      return;
+    }
+    if (localQuestions.length === 0) return;
+
+    try {
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'exams'), {
+        title: String(newFile.title),
+        subject: String(newFile.subject),
+        class: String(newFile.class),
+        duration: Number(newFile.duration) || 30,
+        questions: localQuestions,
+        visible: true,
+        isRandom: false,
+        folderId: null,
+        releaseDate: '',
+        expiryDate: '',
+        timestamp: new Date().toISOString()
+      });
+      setLocalQuestions([]);
+      setNewFile({ title: '', subject: '', class: '', duration: 30 });
+      setTeacherTab('bank');
+    } catch (e) { console.error(e); }
+  };
+
+  const startExam = () => {
+    const file = examFiles.find(f => f.id === studentData.fileId);
+    if (!file) return;
+    setCurrentExam(file);
+    let qs = [...(file.questions || [])];
+    if (file.isRandom) {
+      qs.sort(() => Math.random() - 0.5);
+    }
+    setActiveQuizQuestions(qs);
+    setTimeLeft((file.duration || 30) * 60);
+    setUserAnswers(new Array(qs.length).fill(null));
+    setView('exam');
+  };
+
+  const finishExam = async () => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    let pts = 0, total = 0;
+    activeQuizQuestions.forEach((q, i) => { 
+        const p = parseInt(q.p) || 10;
+        pts += userAnswers[i] === q.c ? p : 0; 
+        total += p; 
+    });
+    const final = total > 0 ? Math.round((pts / total) * 100) : 0;
+    setScore(final); setMaxScore(total); setView('result');
+    try {
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'quiz_results'), {
+        student_name: String(studentData.name), 
+        student_class: String(studentData.class), 
+        subject: String(studentData.subject),
+        fileName: String(currentExam.title), 
+        score: Number(final), 
+        timestamp: new Date().toISOString(),
+        // Simpan snapshot soal dan jawaban untuk review
+        answers: userAnswers,
+        questionsSnapshot: activeQuizQuestions
+      });
+    } catch (e) { console.error(e); } finally { setIsSubmitting(false); }
+  };
+
+  const formatTime = (seconds) => {
+    const m = Math.floor(seconds / 60);
+    const s = (seconds % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  };
+
+  const formatDate = (isoString) => {
+    if (!isoString) return "-";
+    const date = new Date(isoString);
+    return date.toLocaleString('id-ID', { 
+      day: '2-digit', 
+      month: 'short', 
+      year: 'numeric', 
+      hour: '2-digit', 
+      minute: '2-digit' 
+    });
+  };
+
+  // Logic Sortir
+  const getSortedResults = () => {
+    let base = results
+      .filter(res => filterSubject === 'Semua Mapel' || res.subject === filterSubject)
+      .filter(res => filterFile === 'Semua File' || res.fileName === filterFile);
+
+    switch(sortType) {
+      case 'waktu-terbaru':
+        return base.sort((a,b) => new Date(b.timestamp) - new Date(a.timestamp));
+      case 'waktu-terlama':
+        return base.sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
+      case 'skor-tertinggi':
+        return base.sort((a,b) => b.score - a.score);
+      case 'skor-terendah':
+        return base.sort((a,b) => a.score - b.score);
+      case 'nama-az':
+        return base.sort((a,b) => a.student_name.localeCompare(b.student_name));
+      case 'nama-za':
+        return base.sort((a,b) => b.student_name.localeCompare(a.student_name));
+      default:
+        return base;
+    }
+  };
+
+  if (loading) return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-50">
+      <div className="text-center">
+        <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mx-auto mb-4"></div>
+        <p className="font-black text-indigo-600 text-xs tracking-widest uppercase">Menghubungkan ke NISE...</p>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-800 overflow-hidden text-sm selection:bg-indigo-100 antialiased">
+      
+      {/* BERANDA */}
+      {view === 'front' && (
+        <div className="min-h-screen flex items-center justify-center p-4 bg-indigo-50/20">
+          <div className="w-full max-w-sm bg-white rounded-[2.5rem] shadow-xl overflow-hidden border border-indigo-100 animate-in">
+            <div className="bg-indigo-600 p-8 text-center text-white">
+              <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center mx-auto mb-3 backdrop-blur-md">
+                <BookOpen size={24} />
+              </div>
+              <h1 className="text-xl font-black tracking-tight">NISE</h1>
+              <p className="text-[8px] font-bold uppercase tracking-widest mt-1">Smart Exam System</p>
+            </div>
+            <div className="p-6 space-y-3 font-bold">
+              <input type="text" placeholder="Nama Lengkap" className="w-full p-3 bg-slate-50 border-2 border-transparent focus:border-indigo-500 rounded-xl text-center outline-none text-slate-800 transition-all" value={studentData.name} onChange={e => setStudentData({...studentData, name: e.target.value})} />
+              <select className="w-full p-3 bg-slate-50 border-2 border-transparent rounded-xl text-center outline-none text-slate-800 appearance-none cursor-pointer" value={studentData.class} onChange={e => setStudentData({...studentData, class: e.target.value})}>
+                <option value="">-- Kelas --</option>
+                {CLASS_LIST.map(c => <option key={c} value={c}>{String(c)}</option>)}
+              </select>
+              <select className="w-full p-3 bg-slate-50 border-2 border-transparent rounded-xl text-center outline-none text-slate-800 appearance-none cursor-pointer" value={studentData.subject} onChange={e => setStudentData({...studentData, subject: e.target.value, fileId: ''})}>
+                <option value="">-- Mata Pelajaran --</option>
+                {SUBJECT_LIST.map(s => <option key={s} value={s}>{String(s)}</option>)}
+              </select>
+              <select disabled={!studentData.subject} className="w-full p-3 bg-slate-50 border-2 border-transparent rounded-xl text-center outline-none disabled:opacity-30 appearance-none text-slate-800 cursor-pointer" value={studentData.fileId} onChange={e => setStudentData({...studentData, fileId: e.target.value})}>
+                <option value="">-- Pilih File Ujian --</option>
+                {examFiles.filter(f => String(f.subject) === String(studentData.subject) && f.visible !== false).map(f => <option key={f.id} value={f.id}>{String(f.title)}</option>)}
+              </select>
+              <button onClick={startExam} disabled={!studentData.fileId || !studentData.name} className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black shadow-lg hover:bg-indigo-700 disabled:bg-slate-100 disabled:text-slate-300 transition-all active:scale-95">MULAI UJIAN</button>
+              <button onClick={() => setTeacherLogin({...teacherLogin, show: true})} className="w-full text-slate-400 text-[10px] uppercase font-black tracking-widest pt-2 flex items-center justify-center gap-2 hover:text-indigo-600">
+                <Lock size={12} /> Area Guru
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* LOGIN GURU */}
+      {teacherLogin.show && (
+        <div className="fixed inset-0 z-[1000] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-xs rounded-[2rem] p-6 shadow-2xl animate-in text-center font-bold">
+            <h3 className="text-lg mb-4 text-slate-800 tracking-widest uppercase">Akses Guru</h3>
+            <input type="text" placeholder="Username" className="w-full p-3 bg-slate-50 border-2 rounded-xl mb-2 text-center text-slate-800" value={teacherLogin.username} onChange={e => setTeacherLogin({...teacherLogin, username: e.target.value})} />
+            <input type="password" placeholder="Password" className="w-full p-3 bg-slate-50 border-2 rounded-xl mb-4 text-center text-slate-800" value={teacherLogin.password} onChange={e => setTeacherLogin({...teacherLogin, password: e.target.value})} />
+            <div className="flex gap-2">
+              <button onClick={handleTeacherLogin} className="flex-1 py-2.5 bg-indigo-600 text-white rounded-xl text-xs">Masuk</button>
+              <button onClick={() => setTeacherLogin({...teacherLogin, show: false})} className="flex-1 py-2.5 bg-slate-100 text-slate-400 rounded-xl text-xs">Batal</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PANEL GURU */}
+      {view === 'teacher' && (
+        <div className="fixed inset-0 bg-white flex flex-col z-[500] animate-in overflow-hidden font-bold">
+          
+          {showWarning && (
+            <div className="fixed top-24 left-1/2 -translate-x-1/2 z-[2000] bg-red-600 text-white px-6 py-3 rounded-2xl flex items-center gap-3 shadow-2xl animate-bounce w-max border-2 border-white/20">
+              <AlertCircle size={18} /> <span className="text-xs font-black">Identitas Ujian belum lengkap!</span>
+            </div>
+          )}
+
+          <header className="bg-indigo-600 text-white p-3 flex justify-between items-center shadow-lg px-6 shrink-0">
+            <div className="flex items-center gap-2">
+              <div className="bg-white/20 p-1.5 rounded-lg"><LayoutDashboard size={16} /></div>
+              <h2 className="text-sm">Panel Guru NISE</h2>
+            </div>
+            <button onClick={() => setView('front')} className="p-1.5 hover:bg-white/10 rounded-lg"><LogOut size={16} /></button>
+          </header>
+
+          <nav className="flex bg-slate-50 p-1 shrink-0 border-b">
+            {[
+              { id: 'results', label: 'Hasil Ujian', icon: LayoutDashboard },
+              { id: 'bank', label: 'Bank Soal', icon: Database },
+              { id: 'create', label: 'Buat Ujian', icon: PlusCircle }
+            ].map(tab => (
+              <button key={tab.id} onClick={() => setTeacherTab(tab.id)} className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl transition-all text-[10px] uppercase tracking-wider ${teacherTab === tab.id ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-400'}`}>
+                <tab.icon size={14} /> {tab.label}
+              </button>
+            ))}
+          </nav>
+
+          <main className="flex-1 overflow-y-auto p-4 bg-slate-50/50 text-slate-800">
+            <div className="max-w-6xl mx-auto">
+              
+              {teacherTab === 'results' && (
+                <div className="space-y-3">
+                  {/* BARIS FILTER RAMPING */}
+                  <div className="bg-white p-3 rounded-2xl border border-slate-100 shadow-sm animate-in flex flex-col md:flex-row items-center gap-3">
+                    <div className="flex items-center gap-2 pr-3 md:border-r border-slate-100 shrink-0">
+                      <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl"><SlidersHorizontal size={14}/></div>
+                      <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Filter</span>
+                    </div>
+
+                    <div className="flex-1 w-full grid grid-cols-1 md:grid-cols-3 gap-2">
+                      <div className="relative group">
+                        <select 
+                          className="w-full pl-3 pr-8 py-2 bg-slate-50 border border-transparent rounded-xl text-[10px] font-black uppercase tracking-wider outline-none focus:bg-white focus:border-indigo-400 transition-all appearance-none cursor-pointer"
+                          value={filterSubject}
+                          onChange={(e) => setFilterSubject(e.target.value)}
+                        >
+                          <option value="Semua Mapel">Mata Pelajaran: Semua</option>
+                          {SUBJECT_LIST.map(s => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                      </div>
+
+                      <div className="relative group">
+                        <select 
+                          disabled={filterSubject === 'Semua Mapel'}
+                          className="w-full pl-3 pr-8 py-2 bg-slate-50 border border-transparent rounded-xl text-[10px] font-black uppercase tracking-wider outline-none focus:bg-white focus:border-indigo-400 transition-all appearance-none cursor-pointer disabled:opacity-40"
+                          value={filterFile}
+                          onChange={(e) => setFilterFile(e.target.value)}
+                        >
+                          <option value="Semua File">File: Semua</option>
+                          {[...new Set(results.filter(r => r.subject === filterSubject).map(r => r.fileName))].map(fn => (
+                            <option key={fn} value={fn}>{fn}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="relative group">
+                        <select 
+                          className="w-full pl-3 pr-8 py-2 bg-indigo-50 text-indigo-700 border border-transparent rounded-xl text-[10px] font-black uppercase tracking-wider outline-none focus:bg-white focus:border-indigo-400 transition-all appearance-none cursor-pointer"
+                          value={sortType}
+                          onChange={(e) => setSortType(e.target.value)}
+                        >
+                          <option value="waktu-terbaru">Urutan: Terbaru</option>
+                          <option value="waktu-terlama">Urutan: Terlama</option>
+                          <option value="skor-tertinggi">Urutan: Skor Tertinggi</option>
+                          <option value="skor-terendah">Urutan: Skor Terendah</option>
+                          <option value="nama-az">Urutan: Nama A-Z</option>
+                          <option value="nama-za">Urutan: Nama Z-A</option>
+                        </select>
+                        <ArrowDownWideNarrow size={12} className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-indigo-400" />
+                      </div>
+                    </div>
+
+                    <div className="flex gap-2 shrink-0">
+                      <button 
+                        onClick={handleExportToExcel}
+                        className="px-4 py-2 bg-emerald-600 text-white rounded-xl flex items-center gap-2 shadow-sm hover:bg-emerald-700 transition-all text-[10px] uppercase font-black"
+                        title="Ekspor ke Excel"
+                        disabled={getSortedResults().length === 0}
+                      >
+                        <Download size={14}/> Ekspor
+                      </button>
+
+                      {selectedResultIds.length > 0 && (
+                        <button 
+                          onClick={handleBulkDeleteResults} 
+                          className="px-4 py-2 bg-red-600 text-white rounded-xl flex items-center gap-2 shadow-lg animate-in transition-all text-[10px] uppercase font-black"
+                        >
+                          <Trash2 size={14}/> Hapus ({selectedResultIds.length})
+                        </button>
+                      )}
+                      {(filterSubject !== 'Semua Mapel' || filterFile !== 'Semua File' || sortType !== 'waktu-terbaru' || selectedResultIds.length > 0) && (
+                        <button 
+                          onClick={() => { setFilterSubject('Semua Mapel'); setFilterFile('Semua File'); setSortType('waktu-terbaru'); setSelectedResultIds([]); }} 
+                          className="p-2 bg-slate-100 text-slate-400 rounded-xl hover:bg-slate-200 transition-all shrink-0"
+                          title="Reset Filter"
+                        >
+                          <X size={14}/>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* TABEL DATA */}
+                  <div className="bg-white rounded-[2rem] shadow-sm border border-slate-100 overflow-hidden text-slate-800">
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left min-w-[900px]">
+                        <thead className="bg-slate-50 text-[9px] uppercase text-slate-400 border-b">
+                            <tr>
+                            <th className="p-4 w-12 text-center">
+                              <input 
+                                type="checkbox" 
+                                className="w-4 h-4 rounded-md accent-indigo-600 cursor-pointer"
+                                checked={getSortedResults().length > 0 && selectedResultIds.length === getSortedResults().length}
+                                onChange={() => toggleSelectAllResults(getSortedResults())}
+                              />
+                            </th>
+                            <th className="p-4">Santri & Kelas</th>
+                            <th className="p-4">Mata Pelajaran & File</th>
+                            <th className="p-4">Waktu Submit</th>
+                            <th className="p-4 text-center">Nilai</th>
+                            <th className="p-4 text-right">Aksi</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50 text-[11px]">
+                            {getSortedResults().map(res => (
+                            <tr key={res.id} className={`hover:bg-indigo-50/30 transition-all animate-in ${selectedResultIds.includes(res.id) ? 'bg-indigo-50/50' : ''}`}>
+                                <td className="p-4 text-center">
+                                  <input 
+                                    type="checkbox" 
+                                    className="w-4 h-4 rounded-md accent-indigo-600 cursor-pointer"
+                                    checked={selectedResultIds.includes(res.id)}
+                                    onChange={() => toggleSelectResult(res.id)}
+                                  />
+                                </td>
+                                <td className="p-4">
+                                <div className="flex items-center gap-2">
+                                    <div className="w-7 h-7 bg-indigo-50 text-indigo-500 rounded-full flex items-center justify-center"><User size={14}/></div>
+                                    <div>
+                                        <div className="font-black">{String(res.student_name)}</div>
+                                        <div className="text-[9px] opacity-50 uppercase">Kelas {String(res.student_class)}</div>
+                                    </div>
+                                </div>
+                                </td>
+                                <td className="p-4">
+                                <div className="flex items-center gap-2">
+                                    <div className="w-7 h-7 bg-emerald-50 text-emerald-500 rounded-full flex items-center justify-center"><FileText size={14}/></div>
+                                    <div>
+                                        <div className="font-black text-slate-700">{String(res.subject)}</div>
+                                        <div className="text-[9px] opacity-50 uppercase line-clamp-1">{String(res.fileName)}</div>
+                                    </div>
+                                </div>
+                                </td>
+                                <td className="p-4">
+                                <div className="flex items-center gap-2 text-slate-400">
+                                    <History size={12}/>
+                                    <span className="font-bold text-[10px] num-latin">{formatDate(res.timestamp)}</span>
+                                </div>
+                                </td>
+                                <td className="p-4 text-center">
+                                <div className={`inline-block px-3 py-1 rounded-full font-black text-xs num-latin ${res.score >= 75 ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-500'}`}>
+                                    {Number(res.score)}
+                                </div>
+                                </td>
+                                <td className="p-4 text-right">
+                                <div className="flex justify-end gap-1.5">
+                                    <button 
+                                      onClick={() => setReviewingResult(res)} 
+                                      className="p-2 text-indigo-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
+                                      title="Review Jawaban"
+                                    >
+                                      <Eye size={16} />
+                                    </button>
+                                    <button 
+                                      onClick={() => {
+                                        if(window.confirm('Hapus data ini?')) deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'quiz_results', res.id));
+                                      }} 
+                                      className="p-2 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
+                                    >
+                                      <Trash2 size={16} />
+                                    </button>
+                                </div>
+                                </td>
+                            </tr>
+                            ))}
+                        </tbody>
+                        </table>
+                    </div>
+                    {getSortedResults().length === 0 && (
+                        <div className="p-20 text-center flex flex-col items-center gap-3 opacity-20">
+                            <LayoutDashboard size={48}/>
+                            <p className="text-[10px] font-black uppercase tracking-widest">
+                                {filterSubject !== 'Semua Mapel' 
+                                    ? `Belum ada hasil untuk ${filterSubject}${filterFile !== 'Semua File' ? ` - ${filterFile}` : ''}` 
+                                    : 'Belum ada hasil ujian masuk'}
+                            </p>
+                        </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {teacherTab === 'bank' && (
+                <div className="space-y-4">
+                  {/* Toolbar Bank Soal */}
+                  <div className="flex flex-col sm:flex-row justify-between items-center gap-4 bg-white p-4 rounded-3xl border border-slate-100 shadow-sm">
+                      <div className="flex items-center gap-3">
+                          {currentFolderId && (
+                              <button onClick={() => setCurrentFolderId(null)} className="p-2 bg-slate-100 text-slate-500 rounded-xl hover:bg-indigo-600 hover:text-white transition-all">
+                                  <ArrowLeft size={16} />
+                              </button>
+                          )}
+                          <div>
+                              <h3 className="text-xs font-black text-slate-700 uppercase">
+                                  {currentFolderId ? `Folder: ${folders.find(f => f.id === currentFolderId)?.name}` : 'BANK SOAL UTAMA'}
+                              </h3>
+                              <p className="text-[8px] text-slate-400 uppercase font-black">Organisasi File & Pertanyaan</p>
+                          </div>
+                      </div>
+                      
+                      <div className="flex gap-2">
+                        {currentFolderId && draggedFileId && (
+                            <div 
+                                onDragOver={(e) => handleDragOver(e, null)}
+                                onDrop={() => handleDrop(null)}
+                                className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 border-2 border-dashed transition-all ${dragOverFolderId === null ? 'bg-indigo-600 text-white border-white' : 'bg-slate-50 text-indigo-600 border-indigo-200'}`}
+                            >
+                                <MoveUp size={14}/> Lepas di sini untuk mengeluarkan file
+                            </div>
+                        )}
+                        <button onClick={() => setIsAddingFolder(!isAddingFolder)} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 transition-all ${isAddingFolder ? 'bg-red-50 text-red-500' : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-600 hover:text-white shadow-sm'}`}>
+                            {isAddingFolder ? <X size={14}/> : <FolderPlus size={14}/>}
+                            {isAddingFolder ? 'Batal' : 'Buat Folder'}
+                        </button>
+                      </div>
+                  </div>
+
+                  {/* Form Tambah Folder */}
+                  {isAddingFolder && (
+                      <div className="bg-indigo-50/50 p-4 rounded-3xl border-2 border-indigo-100 flex items-center gap-2 animate-in">
+                          <input type="text" placeholder="Nama Folder Baru..." className="flex-1 p-3 bg-white border-2 border-transparent focus:border-indigo-400 rounded-xl text-xs font-bold outline-none transition-all" value={newFolderName} onChange={e => setNewFolderName(e.target.value)} onKeyPress={e => e.key === 'Enter' && handleCreateFolder()} />
+                          <button onClick={handleCreateFolder} className="p-3 bg-indigo-600 text-white rounded-xl shadow-lg hover:bg-indigo-700 transition-all"><Plus size={16}/></button>
+                      </div>
+                  )}
+
+                  <div className="grid grid-cols-1 gap-4">
+                    {!currentFolderId && folders.map(folder => (
+                        <div 
+                            key={folder.id} 
+                            className="group relative"
+                            onDragOver={(e) => handleDragOver(e, folder.id)}
+                            onDrop={() => handleDrop(folder.id)}
+                        >
+                            <div 
+                                onClick={() => setCurrentFolderId(folder.id)}
+                                className={`bg-white p-5 rounded-[2rem] border-2 transition-all flex items-center justify-between ${dragOverFolderId === folder.id ? 'border-indigo-600 bg-indigo-50 ring-4 ring-indigo-100 scale-[1.02]' : 'border-slate-100 hover:border-amber-400 hover:ring-4 hover:ring-amber-50 cursor-pointer'}`}
+                            >
+                                <div className="flex items-center gap-4">
+                                    <div className="p-3 bg-amber-50 text-amber-500 rounded-2xl"><Folder size={20} /></div>
+                                    <div>
+                                        <h4 className="font-black text-slate-700 text-sm uppercase">{folder.name}</h4>
+                                        <p className="text-[9px] text-slate-400 font-black uppercase">
+                                            {examFiles.filter(f => f.folderId === folder.id).length} File Ujian
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    {draggedFileId && <span className="text-[8px] font-black text-indigo-600 animate-pulse bg-indigo-50 px-2 py-1 rounded-lg">LEPAS DI SINI</span>}
+                                    <ChevronRight size={18} className="text-slate-300 group-hover:text-amber-500" />
+                                </div>
+                            </div>
+                            <button onClick={() => handleDeleteFolder(folder.id)} className="absolute -top-2 -right-2 p-1.5 bg-red-100 text-red-500 rounded-full border-2 border-white opacity-0 group-hover:opacity-100 transition-all shadow-sm">
+                                <Trash2 size={12}/>
+                            </button>
+                        </div>
+                    ))}
+
+                    {examFiles.filter(f => f.folderId === currentFolderId).map(file => (
+                      <div key={file.id} className="space-y-3">
+                        <div 
+                          draggable
+                          onDragStart={() => handleDragStart(file.id)}
+                          onDragEnd={() => { setDraggedFileId(null); setDragOverFolderId(null); }}
+                          onClick={() => {
+                            setExpandedFileId(expandedFileId === file.id ? null : file.id);
+                            setIsAddingSoalToExisting(false);
+                            setEditingSoalIdx(null);
+                          }}
+                          className={`bg-white p-4 rounded-[2rem] border-2 shadow-sm transition-all cursor-grab active:cursor-grabbing flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${draggedFileId === file.id ? 'opacity-30 border-dashed border-indigo-400' : (expandedFileId === file.id ? 'border-indigo-400 ring-4 ring-indigo-50' : 'border-slate-100 hover:border-indigo-200')}`}
+                        >
+                          <div className="flex items-center gap-3 flex-1 min-w-0">
+                            <div className="p-2 bg-slate-50 text-slate-300 rounded-xl">
+                                <GripVertical size={16} />
+                            </div>
+                            <div className="flex-1 min-w-0 text-slate-800">
+                                <h4 className="font-black text-slate-700 text-[14px] line-clamp-1">{String(file.title)}</h4>
+                                <p className="text-[9px] text-slate-400 uppercase font-black mt-0.5 truncate">
+                                {String(file.subject)} • Kls {String(file.class)} • <span className="num-latin">{file.questions?.length || 0}</span> Soal • <span className="num-latin">{file.duration}</span> Menit
+                                </p>
+                            </div>
+                          </div>
+                          
+                          <div className="flex items-center gap-2">
+                            <div className={`p-2 rounded-xl text-[9px] font-black uppercase flex items-center gap-1.5 ${file.visible !== false ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-400'}`}>
+                              {file.visible !== false ? <Eye size={12}/> : <EyeOff size={12}/>}
+                              {file.visible !== false ? 'Tampil' : 'Sembunyi'}
+                            </div>
+                            
+                            <div className="flex gap-1.5">
+                              <button onClick={(e) => { e.stopPropagation(); setEditingExam(file); }} className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl hover:bg-indigo-600 hover:text-white transition-all" title="Edit Metadata">
+                                <Settings size={14}/>
+                              </button>
+                              <button onClick={(e) => { e.stopPropagation(); if(window.confirm('Hapus file ujian ini?')) deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'exams', file.id)); }} className="p-2.5 bg-red-50 text-red-400 rounded-xl hover:bg-red-600 hover:text-white transition-all">
+                                <Trash2 size={14}/>
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                        {expandedFileId === file.id && (
+                          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 animate-in pb-4">
+                            
+                            <div className="lg:col-span-4 bg-white rounded-[2.5rem] border border-slate-100 p-6 shadow-xl space-y-6 text-slate-800">
+                              <div className="flex justify-between items-center">
+                                <h5 className="text-[10px] font-black text-indigo-600 uppercase flex items-center gap-2">
+                                  <Settings size={14}/> Pengaturan Ujian
+                                </h5>
+                                <div className="flex gap-2">
+                                  <button onClick={() => toggleVisibility(file)} className={`p-2 rounded-lg transition-all ${file.visible !== false ? 'bg-emerald-50 text-emerald-600 ring-1 ring-emerald-200' : 'bg-red-50 text-red-400 ring-1 ring-red-100'}`} title="Tampilkan/Sembunyikan">
+                                    {file.visible !== false ? <Eye size={14}/> : <EyeOff size={14}/>}
+                                  </button>
+                                  <button onClick={() => toggleRandomize(file)} className={`p-2 rounded-lg transition-all ${file.isRandom ? 'bg-violet-50 text-violet-600 ring-1 ring-violet-200' : 'bg-slate-50 text-slate-400'}`} title="Acak Urutan Soal">
+                                    <Shuffle size={14}/>
+                                  </button>
+                                </div>
+                              </div>
+                              
+                              <div className="space-y-4">
+                                <div className="space-y-1.5">
+                                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5"><Calendar size={10}/> Jadwal Rilis</label>
+                                  <input type="datetime-local" className="w-full p-3 bg-slate-50 border-2 border-transparent focus:border-indigo-400 rounded-xl text-[10px] font-bold outline-none transition-all" value={file.releaseDate || ''} onChange={(e) => updateSchedule(file.id, 'releaseDate', e.target.value)} />
+                                </div>
+                                <div className="space-y-1.5">
+                                  <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1.5 text-red-400"><Clock size={10}/> Berhenti Rilis</label>
+                                  <input type="datetime-local" className="w-full p-3 bg-slate-50 border-2 border-transparent focus:border-indigo-400 rounded-xl text-[10px] font-bold outline-none transition-all" value={file.expiryDate || ''} onChange={(e) => updateSchedule(file.id, 'expiryDate', e.target.value)} />
+                                </div>
+                              </div>
+                            </div>
+
+                            <div className="lg:col-span-8 bg-white rounded-[2.5rem] border border-slate-100 p-6 shadow-xl flex flex-col text-slate-800">
+                              <div className="flex justify-between items-center mb-4">
+                                <h5 className="text-[10px] font-black text-indigo-600 uppercase flex items-center gap-2"><List size={14}/> Daftar Pertanyaan ({file.questions?.length || 0})</h5>
+                                <button onClick={() => { setIsAddingSoalToExisting(!isAddingSoalToExisting); setEditingSoalIdx(null); setNewQuestion({ q: '', a: ['', '', '', ''], c: 0, p: 10, type: 'mcq' }); if (bankEditorRef.current) bankEditorRef.current.innerHTML = ''; }} className={`px-4 py-1.5 rounded-xl text-[10px] font-black uppercase flex items-center gap-2 transition-all ${isAddingSoalToExisting && editingSoalIdx === null ? 'bg-red-50 text-red-500' : 'bg-indigo-600 text-white shadow-md'}`}>
+                                  {isAddingSoalToExisting && editingSoalIdx === null ? <X size={12}/> : <Plus size={12}/>}
+                                  {isAddingSoalToExisting && editingSoalIdx === null ? 'Batal' : 'Tambah Soal'}
+                                </button>
+                              </div>
+
+                              {isAddingSoalToExisting && (
+                                <div className={`mb-6 p-5 border-2 rounded-3xl animate-in space-y-4 ${editingSoalIdx !== null ? 'bg-blue-50 border-blue-100' : 'bg-indigo-50/50 border-indigo-100'}`}>
+                                  <div className="flex justify-between items-center">
+                                    <h6 className="text-[9px] font-black uppercase text-slate-500">{editingSoalIdx !== null ? `MENGEDIT SOAL NOMOR ${editingSoalIdx + 1}` : 'INPUT PERTANYAAN BARU'}</h6>
+                                    {editingSoalIdx !== null && <button onClick={() => { setIsAddingSoalToExisting(false); setEditingSoalIdx(null); }} className="text-slate-400 hover:text-red-500"><X size={14}/></button>}
+                                  </div>
+
+                                  <div className="flex flex-wrap items-center gap-1 bg-white p-1.5 rounded-xl border text-slate-600 shadow-sm">
+                                    <button onClick={() => execCmd('bold', null, bankEditorRef)} className="p-1.5 hover:bg-slate-100 rounded-md" title="Tebal"><Bold size={14}/></button>
+                                    <button onClick={() => execCmd('italic', null, bankEditorRef)} className="p-1.5 hover:bg-slate-100 rounded-md" title="Miring"><Italic size={14}/></button>
+                                    <button onClick={() => execCmd('underline', null, bankEditorRef)} className="p-1.5 hover:bg-slate-100 rounded-md" title="Garis Bawah"><Underline size={14}/></button>
+                                    <div className="w-px h-4 bg-slate-200 mx-1"></div>
+                                    <button onClick={() => execCmd('superscript', null, bankEditorRef)} className="p-1.5 hover:bg-slate-100 rounded-md" title="Pangkat Atas"><Superscript size={14}/></button>
+                                    <button onClick={() => execCmd('subscript', null, bankEditorRef)} className="p-1.5 hover:bg-slate-100 rounded-md" title="Pangkat Bawah"><Subscript size={14}/></button>
+                                    <div className="w-px h-4 bg-slate-200 mx-1"></div>
+                                    <button onClick={() => execCmd('justifyLeft', null, bankEditorRef)} className="p-1.5 hover:bg-slate-100 rounded-md" title="Rata Kiri"><AlignLeft size={14}/></button>
+                                    <button onClick={() => execCmd('justifyCenter', null, bankEditorRef)} className="p-1.5 hover:bg-slate-100 rounded-md" title="Rata Tengah"><AlignCenter size={14}/></button>
+                                    <button onClick={() => execCmd('justifyRight', null, bankEditorRef)} className="p-1.5 hover:bg-slate-100 rounded-md" title="Rata Kanan"><AlignRight size={14}/></button>
+                                    <button onClick={() => execCmd('justifyFull', null, bankEditorRef)} className="p-1.5 hover:bg-slate-100 rounded-md" title="Rata Kiri-Kanan"><AlignJustify size={14}/></button>
+                                  </div>
+
+                                  <div 
+                                    ref={bankEditorRef}
+                                    contentEditable
+                                    onInput={handleEditorInput}
+                                    className="w-full p-4 bg-white border-2 border-transparent focus:border-indigo-400 rounded-xl min-h-[100px] outline-none text-xs font-bold text-slate-800 leading-relaxed transition-all shadow-inner overflow-y-auto"
+                                    placeholder="Tulis Pertanyaan..."
+                                  ></div>
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                    {newQuestion.a.map((opt, i) => (
+                                      <div key={i} className={`flex items-center gap-2 p-2 border-2 rounded-xl transition-all ${newQuestion.c === i ? 'border-emerald-400 bg-emerald-50' : 'border-slate-50 bg-white'}`}>
+                                        <input type="radio" checked={newQuestion.c === i} onChange={() => setNewQuestion({...newQuestion, c: i})} className="accent-emerald-500 w-3 h-3" />
+                                        <input type="text" placeholder={`Opsi ${MCQ_LABELS[i]}`} className="bg-transparent w-full outline-none text-[10px] font-bold" value={opt} onChange={e => {
+                                          const na = [...newQuestion.a]; na[i] = e.target.value; setNewQuestion({...newQuestion, a: na});
+                                        }} />
+                                      </div>
+                                    ))}
+                                  </div>
+                                  <div className="flex justify-between items-center">
+                                     <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border">
+                                        <span className="text-[9px] text-slate-400 font-black">POIN:</span>
+                                        <input type="number" className="w-10 bg-transparent outline-none text-xs font-black num-latin" value={newQuestion.p} onChange={e => setNewQuestion({...newQuestion, p: parseInt(e.target.value) || 0})} />
+                                     </div>
+                                     <button onClick={() => handleSaveSoalToExisting(file)} className={`px-6 py-2 text-white rounded-xl text-[10px] font-black shadow-lg transition-all ${editingSoalIdx !== null ? 'bg-blue-600 hover:bg-blue-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}>
+                                        {editingSoalIdx !== null ? 'PERBARUI SOAL' : 'SIMPAN KE UJIAN'}
+                                     </button>
+                                  </div>
+                                </div>
+                              )}
+
+                              <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 hide-scroll">
+                                {file.questions?.map((q, qidx) => (
+                                  <div key={qidx} className="p-4 bg-slate-50 rounded-2xl border border-slate-100 flex items-start gap-3 group transition-all hover:bg-white hover:shadow-md">
+                                    <span className="w-7 h-7 bg-white border shadow-sm rounded-lg flex items-center justify-center text-[10px] font-black text-slate-400 shrink-0 num-latin">{qidx + 1}</span>
+                                    <div className="flex-1 min-w-0 text-slate-700">
+                                      <div className="text-[11px] font-bold leading-relaxed mb-2 q-content" dangerouslySetInnerHTML={{ __html: q.q }} />
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 mb-3">
+                                        {q.a.map((opt, oIdx) => opt && (
+                                          <div key={oIdx} className={`text-[9px] px-2.5 py-1.5 rounded-lg border flex items-center gap-2 transition-all ${q.c === oIdx ? 'bg-emerald-50 border-emerald-200 text-emerald-700 font-black' : 'bg-white border-slate-100 text-slate-400 font-bold'}`}>
+                                            <span className={`w-4 h-4 rounded flex items-center justify-center text-[8px] ${q.c === oIdx ? 'bg-emerald-600 text-white' : 'bg-slate-50 text-slate-300'}`}>{MCQ_LABELS[oIdx]}</span>
+                                            <span className="flex-1 line-clamp-1">{opt}</span>
+                                            {q.c === oIdx && <Check size={10} className="shrink-0"/>}
+                                          </div>
+                                        ))}
+                                      </div>
+                                      <div className="flex gap-2">
+                                        <span className="text-[8px] font-black text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded-md uppercase border border-indigo-100">Poin: <span className="num-latin">{Number(q.p)}</span></span>
+                                      </div>
+                                    </div>
+                                    <div className="shrink-0 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                      <button onClick={() => handleEditSoalInBank(q, qidx)} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all" title="Edit Soal"><Edit3 size={14}/></button>
+                                      <button onClick={async () => {
+                                          if(window.confirm('Hapus soal ini?')) {
+                                            const examRef = doc(db, 'artifacts', appId, 'public', 'data', 'exams', file.id);
+                                            const filtered = file.questions.filter((_, i) => i !== qidx);
+                                            await updateDoc(examRef, { questions: filtered });
+                                          }
+                                        }} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all" title="Hapus Soal"><Trash2 size={14}/></button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    
+                    {examFiles.filter(f => f.folderId === currentFolderId).length === 0 && (!folders.length || currentFolderId) && (
+                      <div className="py-20 text-center opacity-30 flex flex-col items-center gap-2">
+                        <Database size={48} />
+                        <p className="font-black uppercase tracking-widest text-[10px]">Belum ada file ujian {currentFolderId && 'di folder ini'}</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {teacherTab === 'create' && (
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start relative pb-20">
+                  
+                  <div className="lg:col-span-5 space-y-4 text-slate-800">
+                    <div className="bg-white rounded-[2rem] p-5 shadow-sm border border-slate-100 space-y-3">
+                      <div className="flex justify-between items-center">
+                        <h3 className="text-xs font-black text-indigo-600 flex items-center gap-2"><Database size={14}/> IDENTITAS UJIAN</h3>
+                        <button onClick={() => setShowBulkImport(true)} className="px-3 py-1 bg-indigo-50 text-indigo-600 rounded-lg text-[10px] flex items-center gap-1 hover:bg-indigo-600 hover:text-white transition-all"><UploadCloud size={12} /> Impor Masal</button>
+                      </div>
+                      <div className="grid grid-cols-1 gap-2 text-xs">
+                        <input type="text" placeholder="Judul File Ujian" className="p-2.5 bg-slate-50 border-2 border-transparent focus:border-indigo-500 rounded-xl outline-none transition-all" value={newFile.title} onChange={e => setNewFile({...newFile, title: e.target.value})} />
+                        <div className="grid grid-cols-2 gap-2">
+                          <select className="p-2.5 bg-slate-50 border-2 border-transparent rounded-xl outline-none transition-all cursor-pointer" value={newFile.subject} onChange={e => setNewFile({...newFile, subject: e.target.value})}>
+                            <option value="">Pilih Mapel</option>
+                            {SUBJECT_LIST.map(s => <option key={s} value={s}>{String(s)}</option>)}
+                          </select>
+                          <select className="p-2.5 bg-slate-50 border-2 border-transparent rounded-xl outline-none transition-all cursor-pointer" value={newFile.class} onChange={e => setNewFile({...newFile, class: e.target.value})}>
+                            <option value="">Pilih Kelas</option>
+                            {CLASS_LIST.map(c => <option key={c} value={c}>{String(c)}</option>)}
+                          </select>
+                        </div>
+                        <div className="flex items-center gap-3 bg-slate-50 p-2.5 rounded-xl border">
+                          <span className="text-[10px] text-slate-400 uppercase w-24">Durasi Ujian:</span>
+                          <input type="number" className="bg-transparent outline-none font-black w-full num-latin" value={newFile.duration} onChange={e => setNewFile({...newFile, duration: parseInt(e.target.value) || 0})} />
+                          <span className="text-[9px] text-slate-400 font-bold">MENIT</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div ref={formRef} className={`rounded-[2rem] p-5 shadow-sm border transition-all duration-300 space-y-4 ${editingId !== null ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-slate-100'}`}>
+                      <div className="flex justify-between items-center">
+                        <h3 className={`text-xs font-black flex items-center gap-2 ${editingId !== null ? 'text-indigo-700' : 'text-indigo-600'}`}>
+                          {editingId !== null ? <Edit3 size={14}/> : <PlusCircle size={14}/>} 
+                          {editingId !== null ? 'SEDANG MENGEDIT SOAL' : 'INPUT PERTANYAAN'}
+                        </h3>
+                        <div className="flex bg-slate-100 p-0.5 rounded-lg">
+                          <button onClick={() => setNewQuestion({...newQuestion, type: 'mcq', a: ['', '', '', '']})} className={`px-2 py-1 rounded-md text-[9px] font-bold ${newQuestion.type === 'mcq' ? 'bg-white shadow text-indigo-600' : 'text-slate-400'}`}>Pilihan Ganda</button>
+                          <button onClick={() => setNewQuestion({...newQuestion, type: 'tf', a: ['Benar', 'Salah']})} className={`px-2 py-1 rounded-md text-[9px] font-bold ${newQuestion.type === 'tf' ? 'bg-white shadow text-indigo-600' : 'text-slate-400'}`}>Benar/Salah</button>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-1 bg-slate-50 p-1.5 rounded-xl border text-slate-600">
+                        <button onClick={() => execCmd('bold', null, editorRef)} className="p-1.5 hover:bg-white rounded-md"><Bold size={14}/></button>
+                        <button onClick={() => execCmd('italic', null, editorRef)} className="p-1.5 hover:bg-white rounded-md"><Italic size={14}/></button>
+                        <button onClick={() => execCmd('underline', null, editorRef)} className="p-1.5 hover:bg-white rounded-md"><Underline size={14}/></button>
+                        <div className="w-px h-4 bg-slate-300 mx-1"></div>
+                        <button onClick={() => execCmd('superscript', null, editorRef)} className="p-1.5 hover:bg-white rounded-md"><Superscript size={14}/></button>
+                        <button onClick={() => execCmd('subscript', null, editorRef)} className="p-1.5 hover:bg-white rounded-md"><Subscript size={14}/></button>
+                        <div className="w-px h-4 bg-slate-300 mx-1"></div>
+                        <button onClick={() => execCmd('justifyLeft', null, editorRef)} className="p-1.5 hover:bg-white rounded-md"><AlignLeft size={14}/></button>
+                        <button onClick={() => execCmd('justifyCenter', null, editorRef)} className="p-1.5 hover:bg-white rounded-md"><AlignCenter size={14}/></button>
+                        <button onClick={() => execCmd('justifyRight', null, editorRef)} className="p-1.5 hover:bg-white rounded-md"><AlignRight size={14}/></button>
+                        <button onClick={() => execCmd('justifyFull', null, editorRef)} className="p-1.5 hover:bg-white rounded-md"><AlignJustify size={14}/></button>
+                      </div>
+
+                      <div 
+                        ref={editorRef}
+                        contentEditable
+                        onInput={handleEditorInput}
+                        className="w-full p-4 bg-white border-2 border-transparent focus:border-indigo-400 rounded-xl min-h-[120px] outline-none text-xs font-bold text-slate-800 leading-relaxed transition-all shadow-inner overflow-y-auto"
+                        placeholder="Tulis Pertanyaan..."
+                      ></div>
+                      
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {newQuestion.a.map((opt, i) => (
+                          <div key={i} className={`flex items-center gap-2 p-2 border-2 rounded-xl transition-all ${newQuestion.c === i ? 'border-emerald-400 bg-emerald-50' : 'border-slate-50 bg-white'}`}>
+                            <input type="radio" checked={newQuestion.c === i} onChange={() => setNewQuestion({...newQuestion, c: i})} className="accent-emerald-500 w-3 h-3" />
+                            <input type="text" placeholder={`Opsi ${MCQ_LABELS[i]}`} className="bg-transparent w-full outline-none text-[10px] font-bold text-slate-800" value={opt} onChange={e => {
+                              const na = [...newQuestion.a]; na[i] = e.target.value; setNewQuestion({...newQuestion, a: na});
+                            }} />
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="flex items-center justify-between gap-4 pt-2">
+                        <div className="flex items-center gap-2 bg-white p-2 rounded-xl border">
+                          <span className="text-[10px] text-slate-400 uppercase">Poin:</span>
+                          <input type="number" className="w-12 bg-transparent outline-none text-[11px] font-black num-latin" value={newQuestion.p} onChange={e => setNewQuestion({...newQuestion, p: parseInt(e.target.value) || 0})} />
+                        </div>
+                        <div className="flex gap-2">
+                           {editingId !== null && <button onClick={cancelEdit} className="px-4 py-2 bg-white text-slate-400 border rounded-xl text-[10px] font-black uppercase">Batal</button>}
+                           <button onClick={addOrUpdateQuestion} className={`px-6 py-2 text-white rounded-xl text-[10px] font-black flex items-center gap-2 shadow-md active:scale-95 transition-all ${editingId !== null ? 'bg-blue-600' : 'bg-indigo-600'}`}>
+                            {editingId !== null ? <Save size={12}/> : <Plus size={12}/>} 
+                            {editingId !== null ? 'PERBARUI SOAL' : 'TAMBAH KE LIST'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="lg:col-span-7 space-y-4 text-slate-800">
+                    <div className="bg-indigo-600 rounded-[2rem] p-4 text-white shadow-lg flex justify-between items-center">
+                      <div>
+                        <h3 className="text-xs font-black uppercase tracking-widest">Antrean Soal</h3>
+                        <p className="text-[9px] opacity-70 font-black"><span className="num-latin">{Number(localQuestions.length)}</span> Soal dalam antrean</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <input type="number" className="w-10 bg-white/20 border-none rounded p-1 text-[10px] text-center outline-none text-white font-bold num-latin" value={globalPoints} onChange={e => setGlobalPoints(parseInt(e.target.value) || 0)} />
+                        <button onClick={() => setLocalQuestions(localQuestions.map(q => ({ ...q, p: globalPoints })))} className="px-2 py-1 bg-white text-indigo-600 rounded-lg text-[9px] font-black hover:bg-indigo-50 transition-colors">Set Semua Poin</button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2 max-h-[500px] overflow-y-auto pr-2 hide-scroll">
+                      {localQuestions.map((q, i) => (
+                        <div key={q.id} className={`bg-white p-3 rounded-2xl border border-slate-100 shadow-sm flex items-start gap-3 group transition-all ${editingId === q.id ? 'ring-2 ring-indigo-500 scale-[1.01]' : ''}`}>
+                          <div className="w-6 h-6 bg-slate-50 text-slate-400 rounded-lg flex items-center justify-center text-[10px] shrink-0 font-black num-latin">{i+1}</div>
+                          <div className="flex-1 overflow-hidden">
+                            <div className="text-[11px] font-bold leading-tight mb-1 break-words q-content" dangerouslySetInnerHTML={{ __html: q.q }} />
+                            <div className="flex flex-wrap gap-2">
+                              {q.a.map((opt, idx) => (
+                                <span key={idx} className={`text-[8px] px-2 py-0.5 rounded-full ${q.c === idx ? 'bg-emerald-100 text-emerald-600 font-black' : 'bg-slate-50 text-slate-400 font-bold'}`}>
+                                  {MCQ_LABELS[idx]}. {String(opt)}
+                                </span>
+                              ))}
+                              <span className="text-[8px] px-2 py-0.5 bg-indigo-50 text-indigo-500 rounded-full font-black uppercase">Poin: <span className="num-latin">{Number(q.p)}</span></span>
+                            </div>
+                          </div>
+                          <div className="flex flex-col gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shrink-0">
+                            <div className="flex gap-1">
+                              <button onClick={() => moveQuestion(i, 'up')} className="p-1.5 bg-slate-50 text-slate-400 rounded-md hover:text-indigo-600"><ArrowUp size={10}/></button>
+                              <button onClick={() => moveQuestion(i, 'down')} className="p-1.5 bg-slate-50 text-slate-400 rounded-md hover:text-indigo-600"><ArrowDown size={10}/></button>
+                            </div>
+                            <div className="flex gap-1">
+                              <button onClick={() => handleEditClick(q)} className={`p-1.5 rounded-md transition-all ${editingId === q.id ? 'bg-indigo-600 text-white' : 'bg-blue-50 text-blue-500 hover:bg-blue-600 hover:text-white'}`}><Edit3 size={10}/></button>
+                              <button onClick={() => duplicateLocalQuestion(q.id)} className="p-1.5 bg-emerald-50 text-emerald-500 rounded-md hover:bg-emerald-600 hover:text-white transition-all"><Copy size={10}/></button>
+                              <button onClick={() => deleteLocalQuestion(q.id)} className="p-1.5 bg-red-50 text-red-500 rounded-md hover:bg-red-600 hover:text-white transition-all"><Trash2 size={10}/></button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {localQuestions.length > 0 && <button onClick={saveExamToDB} className="w-full py-4 bg-indigo-600 text-white rounded-[2rem] shadow-xl hover:bg-indigo-700 transition-all font-black uppercase text-xs tracking-widest flex items-center justify-center gap-2"><Save size={16}/> SIMPAN SELURUH UJIAN KE BANK SOAL</button>}
+                  </div>
+                </div>
+              )}
+
+            </div>
+          </main>
+        </div>
+      )}
+
+      {/* MODAL REVIEW JAWABAN */}
+      {reviewingResult && (
+        <div className="fixed inset-0 z-[1200] bg-slate-900/70 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-2xl rounded-[3rem] shadow-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in border border-white/20">
+            {/* Header Modal */}
+            <div className="bg-indigo-600 p-6 text-white shrink-0">
+              <div className="flex justify-between items-start mb-4">
+                <div>
+                  <h3 className="text-sm font-black uppercase tracking-widest mb-1">Review Hasil Ujian</h3>
+                  <p className="text-[10px] opacity-70 font-bold uppercase">{String(reviewingResult.fileName)}</p>
+                </div>
+                <button onClick={() => setReviewingResult(null)} className="p-2 bg-white/10 hover:bg-white/20 rounded-xl transition-all">
+                  <X size={18}/>
+                </button>
+              </div>
+              <div className="flex items-center gap-4 bg-white/10 p-4 rounded-2xl border border-white/10">
+                <div className="w-10 h-10 bg-white text-indigo-600 rounded-full flex items-center justify-center font-black text-xs shadow-lg num-latin">
+                  {Number(reviewingResult.score)}
+                </div>
+                <div>
+                  <div className="text-xs font-black">{String(reviewingResult.student_name)}</div>
+                  <div className="text-[9px] opacity-70 font-bold uppercase">Kelas {String(reviewingResult.student_class)} • {formatDate(reviewingResult.timestamp)}</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Konten Review */}
+            <div className="flex-1 overflow-y-auto p-6 space-y-5 bg-slate-50/50">
+              {reviewingResult.questionsSnapshot ? reviewingResult.questionsSnapshot.map((q, idx) => {
+                const userAnswerIdx = reviewingResult.answers ? reviewingResult.answers[idx] : null;
+                const isCorrect = userAnswerIdx === q.c;
+                
+                return (
+                  <div key={idx} className={`p-5 rounded-[2rem] border-2 bg-white transition-all ${isCorrect ? 'border-emerald-100 shadow-sm' : 'border-red-100 shadow-sm'}`}>
+                    <div className="flex justify-between items-start mb-4">
+                      <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider ${isCorrect ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-500'}`}>
+                        Soal {idx + 1} • {isCorrect ? 'Benar' : 'Salah'}
+                      </span>
+                      <span className="text-[10px] font-black text-slate-300 num-latin">{Number(q.p)} Poin</span>
+                    </div>
+                    
+                    <div className="text-[12px] font-bold text-slate-700 leading-relaxed mb-4 q-content" dangerouslySetInnerHTML={{ __html: q.q }} />
+                    
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {q.a.map((opt, oIdx) => {
+                        const isChosen = userAnswerIdx === oIdx;
+                        const isTheCorrectOne = q.c === oIdx;
+                        
+                        let bgColor = "bg-slate-50 border-transparent text-slate-400";
+                        let borderColor = "border-transparent";
+                        let icon = null;
+
+                        if (isTheCorrectOne) {
+                          bgColor = "bg-emerald-50 text-emerald-700 font-black";
+                          borderColor = "border-emerald-200";
+                          icon = <CheckCircle size={12} className="text-emerald-500" />;
+                        }
+                        
+                        if (isChosen && !isTheCorrectOne) {
+                          bgColor = "bg-red-50 text-red-600 font-black";
+                          borderColor = "border-red-200";
+                          icon = <X size={12} className="text-red-500" />;
+                        }
+
+                        return opt ? (
+                          <div key={oIdx} className={`p-3 rounded-xl border flex items-center gap-2 text-[10px] transition-all ${bgColor} ${borderColor}`}>
+                            <span className={`w-5 h-5 rounded flex items-center justify-center text-[9px] shrink-0 ${isChosen ? 'ring-2 ring-white shadow-sm' : ''} ${isTheCorrectOne ? 'bg-emerald-600 text-white' : (isChosen ? 'bg-red-600 text-white' : 'bg-white text-slate-200 border')}`}>
+                              {MCQ_LABELS[oIdx]}
+                            </span>
+                            <span className="flex-1 line-clamp-2 leading-snug">{opt}</span>
+                            {icon}
+                          </div>
+                        ) : null;
+                      })}
+                    </div>
+                  </div>
+                );
+              }) : (
+                <div className="py-20 text-center opacity-30 flex flex-col items-center gap-3">
+                  <AlertCircle size={48}/>
+                  <p className="text-[10px] font-black uppercase tracking-widest">Detail jawaban tidak tersedia untuk hasil lama.</p>
+                </div>
+              )}
+            </div>
+
+            {/* Footer Modal */}
+            <div className="p-4 bg-white border-t flex justify-center shrink-0">
+               <button onClick={() => setReviewingResult(null)} className="px-10 py-3 bg-slate-100 text-slate-500 rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-slate-200 transition-all">Tutup</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL EDIT METADATA */}
+      {editingExam && (
+        <div className="fixed inset-0 z-[1100] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 text-slate-800">
+          <div className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 shadow-2xl animate-in font-bold space-y-6 overflow-y-auto max-h-[90vh] hide-scroll">
+            <div className="flex justify-between items-center">
+              <h3 className="text-sm font-black text-indigo-600 flex items-center gap-2"><Settings size={18}/> EDIT METADATA</h3>
+              <button onClick={() => setEditingExam(null)} className="p-2 bg-slate-50 text-slate-400 rounded-xl"><X size={16}/></button>
+            </div>
+            <div className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-[10px] text-slate-400 uppercase tracking-widest pl-2">Judul Ujian</label>
+                <input type="text" className="w-full p-3 bg-slate-50 border-2 border-transparent focus:border-indigo-500 rounded-xl text-xs outline-none transition-all" value={editingExam.title} onChange={e => setEditingExam({...editingExam, title: e.target.value})} />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] text-slate-400 uppercase tracking-widest pl-2">Mapel</label>
+                  <select className="w-full p-3 bg-slate-50 border-2 border-transparent rounded-xl text-[10px] outline-none transition-all cursor-pointer" value={editingExam.subject} onChange={e => setEditingExam({...editingExam, subject: e.target.value})}>
+                    {SUBJECT_LIST.map(s => <option key={s} value={s}>{String(s)}</option>)}
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] text-slate-400 uppercase tracking-widest pl-2">Kelas</label>
+                  <select className="w-full p-3 bg-slate-50 border-2 border-transparent rounded-xl text-[10px] outline-none transition-all cursor-pointer" value={editingExam.class} onChange={e => setEditingExam({...editingExam, class: e.target.value})}>
+                    {CLASS_LIST.map(c => <option key={c} value={c}>{String(c)}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] text-slate-400 uppercase tracking-widest pl-2">Lokasi Folder</label>
+                <div className="flex items-center gap-2 bg-slate-50 p-3 rounded-xl border">
+                    <FolderOpen size={14} className="text-slate-300"/>
+                    <select className="bg-transparent w-full outline-none text-[10px] font-black cursor-pointer" value={editingExam.folderId || ''} onChange={e => setEditingExam({...editingExam, folderId: e.target.value || null})}>
+                        <option value="">Utama (Root)</option>
+                        {folders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                    </select>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label className="text-[10px] text-slate-400 uppercase tracking-widest pl-2">Durasi (Menit)</label>
+                <div className="flex items-center gap-2 bg-slate-50 p-3 rounded-xl border">
+                  <Clock size={14} className="text-slate-300"/>
+                  <input type="number" className="bg-transparent w-full outline-none text-xs font-black num-latin" value={editingExam.duration} onChange={e => setEditingExam({...editingExam, duration: e.target.value})} />
+                </div>
+              </div>
+            </div>
+            <button onClick={handleUpdateMetadata} className="w-full py-4 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl hover:bg-indigo-700 transition-all active:scale-95">Simpan Perubahan</button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL BULK IMPORT */}
+      {showBulkImport && (
+        <div className="fixed inset-0 z-[1100] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-lg rounded-[2.5rem] p-6 shadow-2xl animate-in font-bold">
+            <h3 className="text-sm font-black text-indigo-600 flex items-center gap-2 mb-2"><UploadCloud size={16}/> IMPOR MASAL</h3>
+            <p className="text-[10px] text-slate-400 mb-4 leading-relaxed">Format: Pertanyaan | Opsi1, Opsi2, Opsi3, Opsi4 | Indeks Jawaban (0-3)</p>
+            <textarea placeholder="Contoh: Nama Presiden ke-1 RI | Soekarno, Hatta, Soeharto, Habibie | 0" className="w-full p-4 bg-slate-50 border-2 border-transparent focus:border-indigo-400 rounded-2xl min-h-[200px] outline-none text-xs text-slate-800 transition-all" value={bulkText} onChange={e => setBulkText(e.target.value)} />
+            <div className="flex gap-2 mt-4">
+              <button onClick={handleBulkImport} className="flex-1 py-3 bg-indigo-600 text-white rounded-xl text-xs flex items-center justify-center gap-2 shadow-lg"><Check size={14}/> Proses Impor</button>
+              <button onClick={() => setShowBulkImport(false)} className="px-6 py-3 bg-slate-100 text-slate-400 rounded-xl text-xs">Batal</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAMPILAN UJIAN */}
+      {view === 'exam' && activeQuizQuestions[currentIdx] && (
+        <div className="fixed inset-0 bg-slate-50 flex flex-col z-[100] animate-in font-bold overflow-hidden">
+          <header className="bg-white p-3 border-b flex justify-between items-center px-6 shrink-0 shadow-sm text-slate-800">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-black text-xs">N</div>
+              <div className="text-left leading-tight"><h2 className="text-[11px] line-clamp-1">{String(currentExam.title)}</h2><p className="text-[8px] text-slate-400 uppercase tracking-widest">{String(studentData.name)}</p></div>
+            </div>
+            <div className="px-3 py-1 bg-slate-100 rounded-lg font-mono font-black text-xs text-slate-600 num-latin">
+              {formatTime(timeLeft)}
+            </div>
+          </header>
+          <main className="flex-1 overflow-y-auto p-4 flex flex-col items-center">
+            <div className="w-full max-w-2xl space-y-3">
+              <div className="flex justify-between items-center px-1">
+                <span className="text-[9px] font-black uppercase text-indigo-600">SOAL <span className="num-latin">{Number(currentIdx+1)}</span> DARI <span className="num-latin">{Number(activeQuizQuestions.length)}</span></span>
+                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Bobot: <span className="num-latin">{Number(activeQuizQuestions[currentIdx].p)}</span> Poin</span>
+              </div>
+              <div className="bg-white rounded-[2.5rem] p-8 md:p-12 shadow-xl border border-indigo-50/50 flex flex-col gap-6 text-sm">
+                <div className="text-lg font-bold text-slate-800 text-center leading-relaxed q-content" dangerouslySetInnerHTML={{ __html: activeQuizQuestions[currentIdx].q }} />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {activeQuizQuestions[currentIdx].a.map((opt, i) => opt && (
+                    <button key={i} onClick={() => setUserAnswers(prev => { const n = [...prev]; n[currentIdx] = i; return n; })} className={`p-4 rounded-2xl border-2 transition-all flex items-center gap-3 text-left ${userAnswers[currentIdx] === i ? 'bg-indigo-600 border-indigo-700 text-white shadow-lg' : 'bg-slate-50 border-transparent text-slate-600 hover:border-indigo-100'}`}>
+                      <span className={`w-7 h-7 rounded-lg flex items-center justify-center font-black text-[10px] shrink-0 ${userAnswers[currentIdx] === i ? 'bg-white/20 text-white' : 'bg-white text-slate-200 border border-slate-100'}`}>{activeQuizQuestions[currentIdx].type === 'tf' ? (i === 0 ? '✓' : '✗') : MCQ_LABELS[i]}</span>
+                      <span className="text-sm flex-1 leading-snug">{String(opt)}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </main>
+          <footer className="bg-white border-t p-4 flex justify-between items-center px-8 shrink-0 shadow-lg text-slate-800">
+            <button disabled={currentIdx === 0} onClick={() => setCurrentIdx(v => v - 1)} className="w-12 h-12 bg-slate-100 text-slate-400 rounded-xl flex items-center justify-center disabled:opacity-10 transition-all"><ChevronLeft size={20} /></button>
+            <div className="hidden sm:flex gap-1">{activeQuizQuestions.map((_, idx) => <div key={idx} className={`h-1.5 rounded-full transition-all duration-300 ${idx === currentIdx ? 'w-6 bg-indigo-600' : (userAnswers[idx] !== null ? 'w-1.5 bg-emerald-400' : 'w-1.5 bg-slate-200')}`} />)}</div>
+            {currentIdx === activeQuizQuestions.length - 1 ? (
+              <button onClick={finishExam} disabled={isSubmitting} className="h-11 px-6 bg-emerald-600 text-white rounded-xl font-black text-[10px] uppercase tracking-widest flex items-center gap-2 shadow-lg shadow-emerald-50">{isSubmitting ? "MENGIRIM..." : "SIMPAN & SELESAI"}</button>
+            ) : (
+              <button onClick={() => setCurrentIdx(v => v + 1)} className="w-12 h-12 bg-indigo-600 text-white rounded-xl flex items-center justify-center active:scale-90 shadow-lg shadow-indigo-50"><ChevronRight size={20} /></button>
+            )}
+          </footer>
+        </div>
+      )}
+
+      {/* HASIL AKHIR */}
+      {view === 'result' && (
+        <div className="min-h-screen flex items-center justify-center p-6 bg-indigo-50/10 font-bold animate-in">
+          <div className="w-full max-sm bg-white rounded-[3rem] shadow-2xl p-10 text-center border-t-[12px] border-emerald-500">
+             <div className="text-6xl mb-6">🎖️</div>
+             <h2 className="text-sm font-black text-slate-400 uppercase tracking-widest">Skor Akhir Anda</h2>
+             <p className="text-indigo-600 font-black text-xl mb-8 tracking-tight uppercase">{String(studentData.name)}</p>
+             <div className="bg-emerald-50/50 py-10 rounded-[3rem] mb-10 border border-emerald-100 flex items-center justify-center gap-3">
+               <span className="text-7xl font-black text-emerald-700 tracking-tighter leading-none num-latin">{Number(score)}</span>
+             </div>
+             <button onClick={() => window.location.reload()} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black shadow-lg hover:bg-black active:scale-95 flex items-center justify-center gap-3 transition-all"><RefreshCcw size={18}/> KEMBALI KE BERANDA</button>
+          </div>
+        </div>
+      )}
+
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap');
+        
+        :root {
+          -webkit-font-smoothing: antialiased;
+          -moz-osx-font-smoothing: grayscale;
+          text-rendering: optimizeLegibility;
+        }
+
+        body { 
+          font-family: 'Plus Jakarta Sans', sans-serif;
+          color: #1e293b;
+        }
+
+        .num-latin {
+          font-family: 'Plus Jakarta Sans', sans-serif !important;
+          font-variant-numeric: tabular-nums;
+          font-feature-settings: "tnum";
+        }
+
+        .animate-in { 
+          animation: zoomIn 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.1);
+        }
+
+        .hide-scroll::-webkit-scrollbar { display: none; }
+        
+        @keyframes zoomIn { 
+          from { opacity: 0; transform: scale(0.98); } 
+          to { opacity: 1; transform: scale(1); } 
+        }
+
+        input, select, textarea {
+          font-weight: 600;
+          color: #334155;
+        }
+
+        [contenteditable]:empty:before {
+          content: attr(placeholder);
+          color: #94a3b8;
+          font-weight: 600;
+        }
+
+        .q-content b, .q-content strong { font-weight: 800; }
+        .q-content i, .q-content em { font-style: italic; }
+        .q-content u { text-decoration: underline; }
+        .q-content sub { vertical-align: sub; font-size: 0.75em; }
+        .q-content sup { vertical-align: super; font-size: 0.75em; }
+
+        button {
+          transform: translateZ(0);
+        }
+      `}</style>
+
+    </div>
+  );
+}
