@@ -132,6 +132,21 @@
             </div>
         </div>
 
+        <!-- Custom Modal for Bulk Actions (Archive/Delete) -->
+        <div id="modal-bulk" class="fixed inset-0 z-50 hidden bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+            <div class="glass w-full max-w-sm rounded-[2rem] p-6 shadow-2xl border border-white text-center transform transition-all">
+                <div id="bulk-icon" class="w-16 h-16 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center text-3xl mx-auto mb-4">
+                    <i class="fas fa-exclamation-triangle"></i>
+                </div>
+                <h3 class="text-lg font-bold text-slate-800 mb-2" id="bulk-title">Konfirmasi Aksi</h3>
+                <p class="text-xs text-slate-500 mb-6" id="bulk-desc">Deskripsi aksi massal di sini.</p>
+                <div class="flex gap-2">
+                    <button onclick="closeBulkConfirm()" class="flex-1 py-3 rounded-xl text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 transition-colors">Batal</button>
+                    <button onclick="executeBulkAction()" id="btn-execute-bulk" class="flex-1 py-3 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 transition-colors shadow-md">Ya, Lanjutkan</button>
+                </div>
+            </div>
+        </div>
+
         <!-- Custom Modal for Excel Export -->
         <div id="modal-export" class="fixed inset-0 z-50 hidden bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
             <div class="glass w-full max-w-sm rounded-[2rem] p-6 shadow-2xl border border-white transform transition-all">
@@ -263,20 +278,24 @@
                             </h3>
                             <span class="text-[10px] font-bold bg-blue-50 text-blue-700 px-2 py-1 rounded-lg" id="rekap-periode"></span>
                         </div>
-                        <div class="grid grid-cols-2 gap-3">
-                            <div id="card-rekap-b" class="bg-rose-50/50 p-3 rounded-xl border border-rose-100 transition-colors">
-                                <div class="text-[9px] font-bold text-rose-600 uppercase tracking-wider mb-0.5">Tidak Masuk (B)</div>
-                                <div class="text-xl font-black text-rose-700" id="rekap-b">0 <span class="text-[10px] font-bold text-rose-500">Hari</span></div>
-                            </div>
+                        <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
                             <div class="bg-sky-50/50 p-3 rounded-xl border border-sky-100">
                                 <div class="text-[9px] font-bold text-sky-600 uppercase tracking-wider mb-0.5">Keluar Area (A)</div>
                                 <div class="text-xl font-black text-sky-700" id="rekap-a">0j 0m</div>
+                            </div>
+                            <div id="card-rekap-b" class="bg-rose-50/50 p-3 rounded-xl border border-rose-100 transition-colors">
+                                <div class="text-[9px] font-bold text-rose-600 uppercase tracking-wider mb-0.5">Tidak Masuk (B)</div>
+                                <div class="text-xl font-black text-rose-700" id="rekap-b">0 <span class="text-[10px] font-bold text-rose-500">Hari</span></div>
                             </div>
                             <div class="bg-emerald-50/50 p-3 rounded-xl border border-emerald-100">
                                 <div class="text-[9px] font-bold text-emerald-600 uppercase tracking-wider mb-0.5">Sakit (C)</div>
                                 <div class="text-xl font-black text-emerald-700" id="rekap-c">0 <span class="text-[10px] font-bold text-emerald-500">Hari</span></div>
                             </div>
-                            <div class="bg-indigo-50/50 p-3 rounded-xl border border-indigo-100">
+                            <div class="bg-amber-50/50 p-3 rounded-xl border border-amber-100">
+                                <div class="text-[9px] font-bold text-amber-600 uppercase tracking-wider mb-0.5">Terlambat (D)</div>
+                                <div class="text-xl font-black text-amber-700" id="rekap-d">0 <span class="text-[10px] font-bold text-amber-500">Kali</span></div>
+                            </div>
+                            <div class="bg-indigo-50/50 p-3 rounded-xl border border-indigo-100 col-span-2 md:col-span-1">
                                 <div class="text-[9px] font-bold text-indigo-600 uppercase tracking-wider mb-0.5">Cuti (E)</div>
                                 <div class="text-xl font-black text-indigo-700" id="rekap-e">0 <span class="text-[10px] font-bold text-indigo-500">Hari</span></div>
                             </div>
@@ -435,7 +454,7 @@
 
                 <!-- RIGHT COLUMN: History/List -->
                 <div class="lg:col-span-7">
-                    <div class="glass p-6 md:p-8 rounded-[2.5rem] shadow-xl border border-white min-h-[600px]">
+                    <div class="glass p-6 md:p-8 rounded-[2.5rem] shadow-xl border border-white min-h-[600px] relative">
                         <div class="flex justify-between items-center mb-6">
                             <h3 id="list-title" class="text-xl font-extrabold text-blue-950">Data Pengajuan</h3>
                             <div class="flex gap-2 items-center">
@@ -498,6 +517,15 @@
                             </button>
                         </div>
 
+                        <!-- BULK HEADER FOR KEPALA (Hanya muncul di tab Riwayat) -->
+                        <div id="bulk-header" class="hidden justify-between items-center bg-blue-50/50 p-3 rounded-xl border border-blue-100 mb-4 animate-fade-in">
+                            <label class="flex items-center gap-3 cursor-pointer">
+                                <input type="checkbox" id="check-all" onchange="toggleSelectAll(event)" class="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 border-slate-300">
+                                <span class="text-xs font-bold text-slate-600">Pilih Semua <span class="font-normal">(Data Periode Lalu)</span></span>
+                            </label>
+                            <span id="selected-count" class="text-[10px] font-bold text-blue-700 bg-blue-100 px-2 py-1 rounded-full border border-blue-200">0 Terpilih</span>
+                        </div>
+
                         <!-- Content List -->
                         <div id="main-list-container" class="space-y-4">
                             <!-- Items injected via JS -->
@@ -514,11 +542,26 @@
                 </div>
             </main>
         </div>
+        
+        <!-- BULK ACTION FLOATING BAR -->
+        <div id="bulk-action-bar" class="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 transform translate-y-24 opacity-0 transition-all duration-300 pointer-events-none">
+            <div class="glass px-6 py-4 rounded-full shadow-2xl shadow-blue-900/20 border border-white flex items-center gap-4 pointer-events-auto bg-white/90">
+                <span class="text-xs font-black text-slate-700 whitespace-nowrap"><span id="action-count" class="text-blue-600 text-sm">0</span> Terpilih</span>
+                <div class="w-px h-6 bg-slate-200"></div>
+                <button onclick="openBulkConfirm('archive')" class="px-4 py-2 bg-amber-50 text-amber-600 border border-amber-200 hover:bg-amber-100 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-2">
+                    <i class="fas fa-archive"></i> Arsipkan
+                </button>
+                <button onclick="openBulkConfirm('delete')" class="px-4 py-2 bg-rose-50 text-rose-600 border border-rose-200 hover:bg-rose-100 rounded-xl text-xs font-bold transition-all shadow-sm flex items-center gap-2">
+                    <i class="fas fa-trash"></i> Hapus
+                </button>
+            </div>
+        </div>
+
     </div>
 
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getFirestore, collection, addDoc, updateDoc, doc, onSnapshot, getDoc, setDoc, query, where, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, updateDoc, doc, onSnapshot, getDoc, setDoc, query, where, getDocs, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
         import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
 
         // Firebase Setup
@@ -551,9 +594,15 @@
         let clockInterval = null;
         let activeKepalaTab = 'aktif'; // State untuk Auto-Archive Tabs
 
+        // Bulk Action State
+        let selectedItems = new Set();
+        let bulkActionType = '';
+
         // Tab Switcher Logic
         function switchKepalaTab(tab) {
             activeKepalaTab = tab;
+            selectedItems.clear(); // Hapus seleksi saat pindah tab agar bar hilang
+            updateBulkActionBar();
             renderList();
         }
         window.switchKepalaTab = switchKepalaTab;
@@ -975,7 +1024,8 @@
                 jamSelesai: null, // Digunakan untuk Kategori A
                 jamMulai: cat === 'A' ? document.getElementById('jam_mulai').value : null, // Data bantuan untuk kalkulasi Excel
                 rawStartDate: document.getElementById('tgl_mulai').value || null,
-                rawEndDate: document.getElementById('tgl_selesai').value || null
+                rawEndDate: document.getElementById('tgl_selesai').value || null,
+                isArchived: false // Flag untuk arsip
             };
 
             try {
@@ -1076,6 +1126,125 @@
         }
         window.submitAlasan = submitAlasan;
 
+        // --- BULK ACTIONS LOGIC (HAPUS & ARSIPKAN) ---
+        window.toggleSelection = function(id, event) {
+            if (event.target.checked) selectedItems.add(id);
+            else selectedItems.delete(id);
+            updateBulkActionBar();
+            checkSelectAllState();
+        }
+
+        window.toggleSelectAll = function(event) {
+            const isChecked = event.target.checked;
+            const checkboxes = document.querySelectorAll('.item-checkbox');
+            checkboxes.forEach(cb => {
+                cb.checked = isChecked;
+                if (isChecked) selectedItems.add(cb.value);
+                else selectedItems.delete(cb.value);
+            });
+            updateBulkActionBar();
+        }
+
+        window.checkSelectAllState = function() {
+            const checkboxes = document.querySelectorAll('.item-checkbox');
+            const checkAllBtn = document.getElementById('check-all');
+            if (!checkAllBtn || checkboxes.length === 0) {
+                if(checkAllBtn) checkAllBtn.checked = false;
+                return;
+            }
+            
+            const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+            const someChecked = Array.from(checkboxes).some(cb => cb.checked);
+            
+            checkAllBtn.checked = allChecked;
+            checkAllBtn.indeterminate = someChecked && !allChecked;
+        }
+
+        window.updateBulkActionBar = function() {
+            const bar = document.getElementById('bulk-action-bar');
+            const countSpan1 = document.getElementById('action-count');
+            const countSpan2 = document.getElementById('selected-count');
+            
+            if(countSpan1) countSpan1.textContent = selectedItems.size;
+            if(countSpan2) countSpan2.textContent = `${selectedItems.size} Terpilih`;
+
+            if (selectedItems.size > 0) {
+                bar.classList.remove('translate-y-24', 'opacity-0', 'pointer-events-none');
+                bar.classList.add('translate-y-0', 'opacity-100');
+            } else {
+                bar.classList.add('translate-y-24', 'opacity-0', 'pointer-events-none');
+                bar.classList.remove('translate-y-0', 'opacity-100');
+            }
+        }
+
+        window.openBulkConfirm = function(type) {
+            bulkActionType = type;
+            const title = document.getElementById('bulk-title');
+            const desc = document.getElementById('bulk-desc');
+            const icon = document.getElementById('bulk-icon');
+            const btn = document.getElementById('btn-execute-bulk');
+
+            if (type === 'archive') {
+                title.textContent = 'Arsipkan Data';
+                desc.textContent = `Anda akan mengarsipkan ${selectedItems.size} data pengajuan. Data tidak akan terhapus, tapi disembunyikan dari riwayat utama.`;
+                icon.innerHTML = '<i class="fas fa-archive"></i>';
+                icon.className = 'w-16 h-16 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center text-3xl mx-auto mb-4';
+                btn.className = 'flex-1 py-3 rounded-xl text-xs font-bold text-white bg-amber-500 hover:bg-amber-600 transition-colors shadow-md';
+                btn.textContent = 'Ya, Arsipkan';
+            } else {
+                title.textContent = 'Hapus Permanen';
+                desc.textContent = `Anda akan MENGHAPUS PERMANEN ${selectedItems.size} data pengajuan. Tindakan ini tidak bisa dibatalkan!`;
+                icon.innerHTML = '<i class="fas fa-exclamation-triangle"></i>';
+                icon.className = 'w-16 h-16 rounded-full bg-rose-100 text-rose-600 flex items-center justify-center text-3xl mx-auto mb-4';
+                btn.className = 'flex-1 py-3 rounded-xl text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 transition-colors shadow-md';
+                btn.textContent = 'Ya, Hapus';
+            }
+
+            document.getElementById('modal-bulk').classList.remove('hidden');
+        }
+
+        window.closeBulkConfirm = function() {
+            document.getElementById('modal-bulk').classList.add('hidden');
+            bulkActionType = '';
+        }
+
+        window.executeBulkAction = async function() {
+            const ids = Array.from(selectedItems);
+            if (ids.length === 0) return;
+
+            try {
+                if (bulkActionType === 'archive') {
+                    for (const id of ids) {
+                        await updateDoc(getDocRef(id), { isArchived: true });
+                    }
+                    notify(`${ids.length} data berhasil diarsipkan.`, 'success');
+                } else if (bulkActionType === 'delete') {
+                    for (const id of ids) {
+                        await deleteDoc(getDocRef(id));
+                    }
+                    notify(`${ids.length} data berhasil dihapus permanen.`, 'success');
+                }
+                
+                selectedItems.clear();
+                updateBulkActionBar();
+                closeBulkConfirm();
+                
+                const checkAllBtn = document.getElementById('check-all');
+                if(checkAllBtn) checkAllBtn.checked = false;
+
+            } catch (error) {
+                console.error("Bulk action error:", error);
+                if (error.code === 'permission-denied') {
+                    notify("Gagal menghapus! Pastikan Rules Firestore Anda mengizinkan aksi 'delete'.", "error");
+                } else {
+                    notify("Terjadi kesalahan sistem saat mengeksekusi.", "error");
+                }
+                closeBulkConfirm();
+            }
+        }
+        // --- END BULK ACTIONS LOGIC ---
+
+
         // Fitur Export Excel (Hanya untuk Kepala)
         function openModalExport() {
             document.getElementById('modal-export').classList.remove('hidden');
@@ -1174,8 +1343,11 @@
             const tabsContainer = document.getElementById('kepala-tabs');
             const quickLookDashboard = document.getElementById('quick-look-dashboard');
             const rekapWidget = document.getElementById('pegawai-rekap-widget');
+            const bulkHeader = document.getElementById('bulk-header');
             
-            let dataToShow = izinData; // Default untuk pegawai
+            // Filter utama: HANYA tampilkan data yang belum diarsipkan (isArchived != true)
+            const activeDataFull = izinData.filter(d => !d.isArchived);
+            let dataToShow = activeDataFull; 
 
             if (currentUser.role === 'kepala') {
                 tabsContainer.classList.remove('hidden');
@@ -1185,8 +1357,8 @@
                 if(rekapWidget) rekapWidget.classList.add('hidden');
 
                 // Pisahkan data Aktif dan Riwayat
-                const pendingData = izinData.filter(d => d.status === 'Menunggu Kepala Pondok');
-                const historyData = izinData.filter(d => d.status !== 'Menunggu Kepala Pondok');
+                const pendingData = activeDataFull.filter(d => d.status === 'Menunggu Kepala Pondok');
+                const historyData = activeDataFull.filter(d => d.status !== 'Menunggu Kepala Pondok');
 
                 // --- LOGIKA QUICK LOOK DASHBOARD ---
                 const today = new Date();
@@ -1199,7 +1371,8 @@
                 let userIzinBulanIni = {};
                 let userCatBBulanIni = new Set();
 
-                izinData.forEach(d => {
+                // Kita biarkan dashboard kalkulasi merekap dari activeDataFull
+                activeDataFull.forEach(d => {
                     // Parse tanggal mulai dan selesai dari data
                     let dStart = null;
                     let dEnd = null;
@@ -1208,7 +1381,6 @@
                         dEnd = d.rawEndDate ? new Date(d.rawEndDate) : new Date(dStart); 
                         dEnd.setHours(23,59,59,999);
                     } else if (d.jadwal) {
-                        // Fallback parsing jadwal legacy
                         if (d.jadwal.includes('Tanggal:')) {
                             const match = d.jadwal.match(/Tanggal:\s*(\d+)\/(\d+)\/(\d+)/);
                             if (match) { 
@@ -1228,14 +1400,14 @@
 
                     const docDate = new Date(d.timestamp);
 
-                    // 1. Absen Penuh Hari Ini (Kat B, C, E yang Disetujui)
+                    // 1. Absen Penuh Hari Ini
                     if (d.status === 'Disetujui' && ['B', 'C', 'E'].includes(d.kategori)) {
                         if (dStart && dEnd && today >= dStart && today <= dEnd) {
                             absenCount++;
                         }
                     }
 
-                    // 2. Sedang Keluar Pondok (Kat A yang Disetujui, belum kembali, hari ini)
+                    // 2. Sedang Keluar Pondok
                     if (d.status === 'Disetujui' && d.kategori === 'A' && !d.jamSelesai) {
                         if (dStart && today.getTime() === dStart.getTime()) {
                             keluarCount++;
@@ -1287,16 +1459,24 @@
                     document.getElementById('tab-aktif').className = "pb-3 px-2 text-sm font-bold border-b-2 border-blue-600 text-blue-600 transition-colors";
                     document.getElementById('tab-riwayat').className = "pb-3 px-2 text-sm font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-600 transition-colors";
                     dataToShow = pendingData;
+                    
+                    bulkHeader.classList.add('hidden');
+                    bulkHeader.classList.remove('flex');
                 } else {
                     document.getElementById('tab-aktif').className = "pb-3 px-2 text-sm font-bold border-b-2 border-transparent text-slate-400 hover:text-slate-600 transition-colors";
                     document.getElementById('tab-riwayat').className = "pb-3 px-2 text-sm font-bold border-b-2 border-blue-600 text-blue-600 transition-colors";
                     dataToShow = historyData;
+
+                    bulkHeader.classList.remove('hidden');
+                    bulkHeader.classList.add('flex');
                 }
             } else {
                 tabsContainer.classList.add('hidden');
                 tabsContainer.classList.remove('flex');
                 quickLookDashboard.classList.add('hidden');
                 quickLookDashboard.classList.remove('flex');
+                bulkHeader.classList.add('hidden');
+                bulkHeader.classList.remove('flex');
 
                 if(rekapWidget) {
                     rekapWidget.classList.remove('hidden');
@@ -1314,8 +1494,9 @@
                     const monthNames = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agt", "Sep", "Okt", "Nov", "Des"];
                     document.getElementById('rekap-periode').textContent = `26 ${monthNames[startPeriod.getMonth()]} - 25 ${monthNames[endPeriod.getMonth()]}`;
 
-                    let countB = 0, countC = 0, countE = 0, durMenitA = 0;
+                    let countB = 0, countC = 0, countD = 0, countE = 0, durMenitA = 0;
 
+                    // Hitung rekap gaji pegawai dari SEMUA izinnya (termasuk yang mungkin sudah diarsipkan kepala)
                     izinData.forEach(d => {
                         if (d.userUid === currentUser.uid && d.status === 'Disetujui') {
                             let dStart = null;
@@ -1352,6 +1533,7 @@
 
                                 if (d.kategori === 'B') countB += days;
                                 if (d.kategori === 'C') countC += days;
+                                if (d.kategori === 'D') countD += 1; // Menghitung frekuensi keterlambatan
                                 if (d.kategori === 'E') countE += days;
                                 
                                 if (d.kategori === 'A' && d.jamSelesai) {
@@ -1383,13 +1565,23 @@
                     }
 
                     document.getElementById('rekap-c').innerHTML = `${countC} <span class="text-[10px] font-bold text-emerald-500">Hari</span>`;
+                    document.getElementById('rekap-d').innerHTML = `${countD} <span class="text-[10px] font-bold text-amber-500">Kali</span>`;
                     document.getElementById('rekap-e').innerHTML = `${countE} <span class="text-[10px] font-bold text-indigo-500">Hari</span>`;
                     
                     const aJam = Math.floor(durMenitA / 60);
                     const aMenit = durMenitA % 60;
                     document.getElementById('rekap-a').textContent = `${aJam}j ${aMenit}m`;
                 }
+                
+                dataToShow = activeDataFull.filter(d => d.userUid === currentUser.uid);
             }
+
+            // Pembersihan State Bulk (Mencegah Zombie IDs jika data sudah terhapus)
+            const currentRenderedIds = new Set(dataToShow.map(d => d.id));
+            for (const id of selectedItems) {
+                if (!currentRenderedIds.has(id)) selectedItems.delete(id);
+            }
+            updateBulkActionBar();
 
             if (dataToShow.length === 0) {
                 container.innerHTML = '';
@@ -1399,6 +1591,9 @@
 
             emptyState.classList.add('hidden');
             container.innerHTML = dataToShow.map(item => createCardHTML(item)).join('');
+            
+            // Periksa state "check-all" setelah dirender
+            setTimeout(() => { checkSelectAllState(); }, 50);
         }
         window.renderList = renderList;
 
@@ -1411,6 +1606,29 @@
             if(isPending) statusBadge = 'bg-amber-100 text-amber-700 animate-pulse border-amber-200';
             else if(isDisetujui) statusBadge = 'bg-emerald-100 text-emerald-700 border-emerald-200';
             else statusBadge = 'bg-rose-100 text-rose-700 border-rose-200';
+
+            // Filter Tanggal untuk Bulk Actions Checkbox (hanya menampilkan data periode tutup buku lalu)
+            const todayDate = new Date();
+            let currentPeriodStartForCheck;
+            if (todayDate.getDate() > 25) {
+                currentPeriodStartForCheck = new Date(todayDate.getFullYear(), todayDate.getMonth(), 26);
+            } else {
+                currentPeriodStartForCheck = new Date(todayDate.getFullYear(), todayDate.getMonth() - 1, 26);
+            }
+            const isPastPeriod = new Date(item.timestamp) < currentPeriodStartForCheck;
+            
+            let rightSideHTML = `<span class="status-badge border ${statusBadge}">${item.status}</span>`;
+            
+            // Checkbox untuk Hapus/Arsip (Hanya di tab Riwayat Kepala Pondok & Melewati Tgl 25)
+            if (currentUser.role === 'kepala' && activeKepalaTab === 'riwayat' && isPastPeriod) {
+                const isChecked = selectedItems.has(item.id) ? 'checked' : '';
+                rightSideHTML = `
+                    <div class="flex items-center gap-3">
+                        ${rightSideHTML}
+                        <input type="checkbox" value="${item.id}" onchange="toggleSelection('${item.id}', event)" class="item-checkbox w-5 h-5 rounded text-blue-600 focus:ring-blue-500 border-slate-300 shadow-sm cursor-pointer" ${isChecked}>
+                    </div>
+                `;
+            }
 
             // Fitur Share Telegram
             const textToShare = encodeURIComponent(`Assalamu'alaikum Warahmatullahi Wabarakatuh.\n\nMohon izin/maklumnya, saya mengabarkan:\nNama: ${item.name}\nIzin: ${item.kategoriLabel}\nWaktu: ${item.jadwal}\nAlasan: ${item.keterangan}\n\nStatus: ${item.status}. Terima kasih.`);
@@ -1490,7 +1708,7 @@
                                 </p>
                             </div>
                         </div>
-                        <span class="status-badge border ${statusBadge}">${item.status}</span>
+                        ${rightSideHTML}
                     </div>
 
                     <div class="bg-blue-50/50 rounded-2xl p-4 border border-blue-100/50 space-y-2">
