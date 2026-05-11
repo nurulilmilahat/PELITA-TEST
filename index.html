@@ -841,7 +841,7 @@
                     break;
                 case 'B': // Tidak masuk
                     showFields(['tanggal', 'konsekuensi']);
-                    noticeText.innerHTML = "Hanya boleh 1x sebulan, maksimal 2 hari. Konsekuensi: Pemotongan Gaji otomatis.";
+                    noticeText.innerHTML = "Jumlah izin tidak masuk kantor maksimal 2 hari dalam sebulan.";
                     break;
                 case 'C': // Sakit
                     showFields(['tipe_sakit', 'tanggal']);
@@ -949,28 +949,95 @@
             
             // 1. Validation Logic (SOP Rules)
             if (cat === 'B') {
-                const t1 = new Date(document.getElementById('tgl_mulai').value);
-                const t2 = new Date(document.getElementById('tgl_selesai').value);
-                const diffDays = Math.ceil(Math.abs(t2 - t1) / (1000 * 60 * 60 * 24)) + 1; 
+                const d1 = new Date(document.getElementById('tgl_mulai').value);
+                d1.setHours(0,0,0,0);
+                const d2 = new Date(document.getElementById('tgl_selesai').value);
+                d2.setHours(0,0,0,0);
                 
-                if (diffDays > 2) {
-                    notify('Ditolak: Izin Tidak Masuk maksimal 2 hari berturut-turut.', 'error');
+                // Menghitung jumlah hari yang diajukan saat ini dengan akurat
+                const currentRequestDays = Math.round(Math.abs(d2 - d1) / (1000 * 60 * 60 * 24)) + 1; 
+                
+                if (currentRequestDays > 2) {
+                    notify('Ditolak: Izin Tidak Masuk maksimal 2 hari.', 'error');
                     return;
                 }
 
-                // Cek kuota bulan ini (Max 1x)
+                // Cek akumulasi hari (Max 2 hari per bulan)
                 const currentMonth = now.getMonth();
                 const currentYear = now.getFullYear();
-                const countThisMonth = izinData.filter(d => 
-                    d.userUid === currentUser.uid && 
-                    d.kategori === 'B' && 
-                    new Date(d.timestamp).getMonth() === currentMonth &&
-                    new Date(d.timestamp).getFullYear() === currentYear
-                ).length;
+                
+                let totalDaysTakenThisMonth = 0;
+                
+                izinData.forEach(d => {
+                    // Cek data izin 'B' bulan ini yang statusnya bukan Ditolak
+                    if (d.userUid === currentUser.uid && d.kategori === 'B' && d.status !== 'Ditolak') {
+                        const docDate = new Date(d.timestamp);
+                        if (docDate.getMonth() === currentMonth && docDate.getFullYear() === currentYear) {
+                            let pastD1 = null;
+                            let pastD2 = null;
+                            
+                            if (d.rawStartDate) {
+                                pastD1 = new Date(d.rawStartDate); pastD1.setHours(0,0,0,0);
+                                pastD2 = d.rawEndDate ? new Date(d.rawEndDate) : new Date(pastD1);
+                                pastD2.setHours(0,0,0,0);
+                            } else if (d.jadwal) {
+                                // Fallback untuk data lama
+                                const parts = d.jadwal.split('s/d');
+                                if (parts.length === 2) {
+                                    const m1 = parts[0].trim().split('/');
+                                    const m2 = parts[1].trim().split('/');
+                                    if (m1.length===3) { pastD1 = new Date(m1[2], m1[1]-1, m1[0]); pastD1.setHours(0,0,0,0); }
+                                    if (m2.length===3) { pastD2 = new Date(m2[2], m2[1]-1, m2[0]); pastD2.setHours(0,0,0,0); }
+                                }
+                            }
+                            
+                            let days = 1;
+                            if (pastD1 && pastD2) {
+                                days = Math.round(Math.abs(pastD2 - pastD1) / (1000 * 60 * 60 * 24)) + 1;
+                            }
+                            totalDaysTakenThisMonth += days;
+                        }
+                    }
+                });
 
-                if (countThisMonth >= 1) {
-                    notify('Ditolak: Anda sudah mengambil Izin Tidak Masuk bulan ini (Maksimal 1x/bulan).', 'error');
+                if ((totalDaysTakenThisMonth + currentRequestDays) > 2) {
+                    notify(`Ditolak: Kuota Izin Tidak Masuk Anda habis. (Terpakai: ${totalDaysTakenThisMonth} hari, Pengajuan ini: ${currentRequestDays} hari, Maks: 2 hari/bulan).`, 'error');
                     return;
+                }
+            }
+
+            // Validasi Limit Hari untuk Izin Cuti (Kategori E)
+            if (cat === 'E') {
+                const tipeCuti = document.getElementById('tipe_cuti').value;
+                const t1 = document.getElementById('tgl_mulai').value;
+                const t2 = document.getElementById('tgl_selesai').value;
+                
+                if (t1 && t2) {
+                    const d1 = new Date(t1);
+                    d1.setHours(0,0,0,0);
+                    const d2 = new Date(t2);
+                    d2.setHours(0,0,0,0);
+                    
+                    // Hitung durasi hari pengajuan
+                    const diffDays = Math.round(Math.abs(d2 - d1) / (1000 * 60 * 60 * 24)) + 1;
+                    
+                    // Mapping batas maksimal hari berdasarkan jenis cuti
+                    let maxDays = 0;
+                    if (tipeCuti === 'Menikah (14 Hari)') maxDays = 14;
+                    else if (tipeCuti === 'Melahirkan - Suami (3 Hari)') maxDays = 3;
+                    else if (tipeCuti === 'Melahirkan - Istri (3 Bulan)') maxDays = 90; // Asumsi 3 bulan = 90 hari
+                    else if (tipeCuti === 'Istri/Anak Sakit (2 Hari)') maxDays = 2;
+                    else if (tipeCuti === 'Orang Tua Meninggal (7/14 Hari)') maxDays = 14; // Mengambil nilai maksimal
+                    else if (tipeCuti === 'Ujian Formal (7 Hari)') maxDays = 7;
+                    else if (tipeCuti === 'Berhaji') maxDays = 45; // Asumsi wajar masa haji 45 hari
+                    else if (tipeCuti === 'Umrah Pertama (14 Hari)') maxDays = 14;
+                    else if (tipeCuti === 'Umrah Ke-2 dst (14 Hari)') maxDays = 14;
+
+                    // Cek jika durasi melebihi batas
+                    if (maxDays > 0 && diffDays > maxDays) {
+                        notify(`Ditolak: Pengajuan cuti Anda (${diffDays} hari) melebihi batas maksimal ${maxDays} hari untuk jenis cuti ini.`, 'error');
+                        return; // Blokir proses submit (Berhenti di sini)
+                    }
                 }
             }
 
@@ -1526,7 +1593,9 @@
                             if (dStart && dStart >= startPeriod && dStart <= endPeriod) {
                                 let days = 0;
                                 if(dEnd && dStart) {
-                                    days = Math.ceil((dEnd - dStart) / (1000 * 60 * 60 * 24)) + 1;
+                                    const tStart = new Date(dStart.getFullYear(), dStart.getMonth(), dStart.getDate());
+                                    const tEnd = new Date(dEnd.getFullYear(), dEnd.getMonth(), dEnd.getDate());
+                                    days = Math.round((tEnd - tStart) / (1000 * 60 * 60 * 24)) + 1;
                                 } else {
                                     days = 1;
                                 }
@@ -1630,8 +1699,17 @@
                 `;
             }
 
-            // Fitur Share Telegram
-            const textToShare = encodeURIComponent(`Assalamu'alaikum Warahmatullahi Wabarakatuh.\n\nMohon izin/maklumnya, saya mengabarkan:\nNama: ${item.name}\nIzin: ${item.kategoriLabel}\nWaktu: ${item.jadwal}\nAlasan: ${item.keterangan}\n\nStatus: ${item.status}. Terima kasih.`);
+            // Fitur Share Telegram (Disesuaikan berdasarkan Role Pegawai / Pimpinan)
+            let textToShareRaw = '';
+            if (currentUser.role === 'pegawai') {
+                textToShareRaw = `PELITA - Nurul Ilmi\nAssalamu'alaikum Warahmatullahi Wabarakatuh.\n\nDengan penuh hormat, saya bermaksud mengajukan permohonan izin sebagai berikut:\n\n👤 Nama: ${item.name}\n📝 Izin: ${item.kategoriLabel}\n📅 Waktu: ${item.jadwal}\n📌 Keperluan: ${item.keterangan}\n\nDemikian permohonan ini saya sampaikan. Atas perhatian dan kebijaksanaan Bapak Pimpinan Pondok, saya ucapkan jazakumullah khairan katsiran.`;
+            } else {
+                const catatan = (item.alasanKepsek && item.alasanKepsek !== '-') ? item.alasanKepsek : '-';
+                const statusVal = item.status === 'Disetujui' ? 'DISETUJUI' : (item.status === 'Ditolak' ? 'DITOLAK' : 'PENDING');
+                textToShareRaw = `PELITA - Nurul Ilmi\nAssalamu'alaikum Warahmatullahi Wabarakatuh.\n\nMenindaklanjuti permohonan izin yang diajukan, Pimpinan Pondok telah menetapkan keputusan sebagai berikut:\n\n👤 Nama: ${item.name}\n📝 Jenis: ${item.kategoriLabel}\n✅ Status Izin: ${statusVal}\n📅 Periode: ${item.jadwal}\n💬 Catatan Pimpinan: ${catatan}\n\nAtas perhatian dan kerjasama Saudara, kami ucapkan jazakumullah khairan katsiran.\n\nHormat kami, \nKepala Ponpes Nurul Ilmi Lahat.`;
+            }
+            const textToShare = encodeURIComponent(textToShareRaw);
+            
             const telegramBtn = `
                 <a href="https://t.me/share/url?url=Sistem%20Perizinan%20Nurul%20Ilmi&text=${textToShare}" target="_blank" class="inline-flex items-center gap-1.5 text-[10px] font-bold text-sky-600 bg-sky-50 px-3 py-1.5 rounded-lg hover:bg-sky-100 transition-colors border border-sky-100">
                     <i class="fab fa-telegram-plane"></i> Bagikan ke Grup
