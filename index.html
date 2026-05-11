@@ -1699,14 +1699,23 @@
                 `;
             }
 
-            // Fitur Share Telegram (Disesuaikan berdasarkan Role Pegawai / Pimpinan)
+            // Fitur Share Telegram (Disesuaikan berdasarkan Role Pegawai / Pimpinan & Status)
             let textToShareRaw = '';
+            const catatan = (item.alasanKepsek && item.alasanKepsek !== '-') ? item.alasanKepsek : '-';
+            const statusVal = item.status === 'Disetujui' ? 'DISETUJUI' : (item.status === 'Ditolak' ? 'DITOLAK' : 'PENDING');
+            
             if (currentUser.role === 'pegawai') {
-                textToShareRaw = `PELITA - Nurul Ilmi\nAssalamu'alaikum Warahmatullahi Wabarakatuh.\n\nDengan penuh hormat, saya bermaksud mengajukan permohonan izin sebagai berikut:\n\n👤 Nama: ${item.name}\n📝 Izin: ${item.kategoriLabel}\n📅 Waktu: ${item.jadwal}\n📌 Keperluan: ${item.keterangan}\n\nDemikian permohonan ini saya sampaikan. Atas perhatian dan kebijaksanaan Bapak Pimpinan Pondok, saya ucapkan jazakumullah khairan katsiran.`;
+                if (item.status === 'Menunggu Kepala Pondok') {
+                    // Pesan Saat Baru Mengajukan
+                    textToShareRaw = `PELITA - Nurul Ilmi\n\nAssalamu'alaikum Warahmatullahi Wabarakatuh.\n\nDengan hormat, saya bermaksud mengajukan permohonan izin sebagai berikut:\n\n👤 Nama: ${item.name}\n📝 Izin: ${item.kategoriLabel}\n📅 Waktu: ${item.jadwal}\n📌 Keperluan: ${item.keterangan}\n\nDemikian permohonan ini saya sampaikan. Atas perhatian dan kebijaksanaan Pimpinan Pondok, saya ucapkan jazakumullah khairan katsiran.`;
+                } else {
+                    // Pesan Saat Sudah Ditindaklanjuti (Disetujui/Ditolak)
+                    const iconStatus = item.status === 'Disetujui' ? '✅' : '❌';
+                    textToShareRaw = `PELITA - Nurul Ilmi\n\nAssalamu'alaikum Warahmatullahi Wabarakatuh.\n\nMenindaklanjuti permohonan izin yang saya ajukan, Pimpinan Pondok telah menetapkan keputusan sebagai berikut:\n\n${iconStatus} Status: ${statusVal}\n👤 Nama: ${item.name}\n📝 Jenis Izin: ${item.kategoriLabel}\n📅 Periode: ${item.jadwal}\n💬 Catatan Pimpinan: ${catatan}\n\n📢 Demikian informasi ini saya sampaikan kepada rekan-rekan melalui grup Telegram. Jazakumullahu khairan atas perhatian dan pengertiannya.`;
+                }
             } else {
-                const catatan = (item.alasanKepsek && item.alasanKepsek !== '-') ? item.alasanKepsek : '-';
-                const statusVal = item.status === 'Disetujui' ? 'DISETUJUI' : (item.status === 'Ditolak' ? 'DITOLAK' : 'PENDING');
-                textToShareRaw = `PELITA - Nurul Ilmi\nAssalamu'alaikum Warahmatullahi Wabarakatuh.\n\nMenindaklanjuti permohonan izin yang diajukan, Pimpinan Pondok telah menetapkan keputusan sebagai berikut:\n\n👤 Nama: ${item.name}\n📝 Jenis: ${item.kategoriLabel}\n✅ Status Izin: ${statusVal}\n📅 Periode: ${item.jadwal}\n💬 Catatan Pimpinan: ${catatan}\n\nAtas perhatian dan kerjasama Saudara, kami ucapkan jazakumullah khairan katsiran.\n\nHormat kami, \nKepala Ponpes Nurul Ilmi Lahat.`;
+                // Pesan Khusus Kepala Pondok
+                textToShareRaw = `PELITA - Nurul Ilmi\n\nAssalamu'alaikum Warahmatullahi Wabarakatuh.\n\nMenindaklanjuti permohonan izin yang diajukan, Pimpinan Pondok telah menetapkan keputusan sebagai berikut:\n\n👤 Nama: ${item.name}\n📝 Jenis: ${item.kategoriLabel}\n✅ Status Izin: ${statusVal}\n📅 Periode: ${item.jadwal}\n💬 Catatan Pimpinan: ${catatan}\n\nAtas perhatian dan kerjasama Saudara, kami ucapkan jazakumullah khairan katsiran.\n\nHormat kami, \nPimpinan Ponpes Nurul Ilmi Lahat.`;
             }
             const textToShare = encodeURIComponent(textToShareRaw);
             
